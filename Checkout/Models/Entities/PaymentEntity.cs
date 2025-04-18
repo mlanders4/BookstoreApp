@@ -4,7 +4,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Bookstore.Checkout.Models.Entities
 {
-    [Table("Checkout")] // Maps to your Checkout table
+    [Table("Checkout")] // Explicitly maps to your Checkout table
     public class PaymentEntity
     {
         [Key]
@@ -16,7 +16,7 @@ namespace Bookstore.Checkout.Models.Entities
         public int OrderId { get; set; }
 
         [Required]
-        [Column("credit_card_number", TypeName = "varchar(50)")]
+        [Column("credit_card_number", TypeName = "varchar(20)")]
         public string MaskedCardNumber { get; set; } // Stores only last 4 digits + mask
 
         [Required]
@@ -30,31 +30,45 @@ namespace Bookstore.Checkout.Models.Entities
         [Column("payment_date", TypeName = "datetime")]
         public DateTime PaymentDate { get; set; } = DateTime.UtcNow;
 
-        [Column("payment_status", TypeName = "varchar(20)")]
-        public string Status { get; set; } = "Pending"; // Pending, Completed, Failed
+        // Business logic status (not mapped to DB)
+        [NotMapped]
+        public string PaymentStatus { get; set; } // "Pending", "Completed", "Failed"
 
         // Navigation property
         [ForeignKey("OrderId")]
-        public OrderEntity Order { get; set; }
+        public virtual OrderEntity Order { get; set; }
 
-        // Helper methods
-        public void MaskCardNumber(string fullCardNumber)
+        // Constructor for creating from payment request
+        public static PaymentEntity FromPaymentRequest(int orderId, PaymentInfoRequest request, decimal amount)
         {
-            if (string.IsNullOrWhiteSpace(fullCardNumber) return;
-            
-            // Store only last 4 digits (e.g., ****-****-****-4242)
-            MaskedCardNumber = $"****-****-****-{fullCardNumber[^4..]}";
+            return new PaymentEntity
+            {
+                OrderId = orderId,
+                MaskedCardNumber = request.GetMaskedCardNumber(),
+                ExpiryDate = request.GetExpiryDateTime(),
+                Amount = amount,
+                PaymentStatus = "Pending"
+            };
         }
 
-        public void ProcessPayment(bool isSuccessful)
+        // Payment processing result
+        public void ProcessPaymentResult(bool isSuccessful, string transactionId = null)
         {
-            Status = isSuccessful ? "Completed" : "Failed";
+            PaymentStatus = isSuccessful ? "Completed" : "Failed";
             PaymentDate = DateTime.UtcNow;
+            
+            if (isSuccessful && !string.IsNullOrEmpty(transactionId))
+            {
+                // Store transaction ID if needed
+            }
         }
 
-        public bool IsCardExpired()
+        // Validation
+        public bool IsValid()
         {
-            return ExpiryDate < DateTime.Now.AddMonths(-1); // 1 month grace period
+            return ExpiryDate > DateTime.Now.AddMonths(-1) && // Grace period
+                   !string.IsNullOrWhiteSpace(MaskedCardNumber) &&
+                   Amount > 0;
         }
     }
 }
