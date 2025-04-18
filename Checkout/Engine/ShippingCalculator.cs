@@ -9,8 +9,8 @@ namespace Bookstore.Checkout.Engine
     public class ShippingCalculator
     {
         private readonly HttpClient _httpClient;
-        private const string WarehouseAddress = "YOUR_WAREHOUSE_ADDRESS"; // Replace this
-        private const string UserAgent = "YourBookstoreApp/1.0";
+        private const string WarehouseAddress = "1144 T St, Lincoln, NE 68588 ";
+        private const string UserAgent = "BookstoreApp";
 
         public ShippingCalculator()
         {
