@@ -1,130 +1,123 @@
 using System.Net.Http.Json;
 using Bookstore.Checkout.Models.Requests;
 using Bookstore.Checkout.Models.Responses;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Bookstore.Checkout.Engine;
 
 public class ShippingCalculator : IShippingCalculator
 {
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly string _googleMapsApiKey;
-    private const decimal CostPerMile = 0.15m; // Adjust based on your business needs
+    private readonly ILogger<ShippingCalculator> _logger;
+    private const string WarehouseAddress = "1600 Amphitheatre Parkway, Mountain View, CA"; // Replace with your warehouse
 
-    public ShippingCalculator(IHttpClientFactory httpClientFactory, IConfiguration config)
+    public ShippingCalculator(
+        IHttpClientFactory httpClientFactory,
+        ILogger<ShippingCalculator> logger)
     {
         _httpClientFactory = httpClientFactory;
-        _googleMapsApiKey = config["GoogleMaps:ApiKey"];
+        _logger = logger;
     }
 
     public async Task<ShippingOption> CalculateAsync(AddressRequest address, ShippingMethod method)
     {
-        ValidateAddress(address);
-
-        // Get distance from Google Maps API
-        var distance = await GetDistanceMilesAsync(
-            "YOUR_WAREHOUSE_ADDRESS", // Replace with your actual warehouse address
-            $"{address.Street}, {address.City}, {address.PostalCode}, {address.Country}"
-        );
-
-        decimal baseCost = method switch
+        try
         {
-            ShippingMethod.Standard => CalculateStandardCost(distance),
-            ShippingMethod.Express => CalculateExpressCost(distance),
-            ShippingMethod.SameDay => CalculateSameDayCost(distance, address.City),
-            _ => throw new ArgumentOutOfRangeException(nameof(method))
-        };
+            var destination = $"{address.Street}, {address.City}, {address.PostalCode}, {address.Country}";
+            
+            // Get distance in miles
+            double distance = await GetDistanceMilesAsync(WarehouseAddress, destination);
+            
+            decimal cost = method switch
+            {
+                ShippingMethod.Standard => 4.99m + (decimal)distance * 0.10m,
+                ShippingMethod.Express => 9.99m + (decimal)distance * 0.15m,
+                ShippingMethod.SameDay => 24.99m + (decimal)distance * 0.30m,
+                _ => 9.99m
+            };
 
-        return new ShippingOption(
-            Method: method,
-            Cost: Math.Round(baseCost, 2),
-            DeliveryEstimate: GetDeliveryEstimate(method, distance)
-        );
+            return new ShippingOption(
+                Method: method,
+                Cost: Math.Round(cost, 2),
+                DeliveryEstimate: GetDeliveryEstimate(distance, method)
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to calculate shipping");
+            return GetFallbackOption(method);
+        }
     }
 
     private async Task<double> GetDistanceMilesAsync(string origin, string destination)
     {
-        var client = _httpClientFactory.CreateClient("GoogleMaps");
+        var client = _httpClientFactory.CreateClient();
         
-        var response = await client.GetFromJsonAsync<GoogleMapsDistanceResponse>(
-            $"/maps/api/distancematrix/json?units=imperial" +
-            $"&origins={Uri.EscapeDataString(origin)}" +
-            $"&destinations={Uri.EscapeDataString(destination)}" +
-            $"&key={_googleMapsApiKey}");
+        // Step 1: Geocode addresses to coordinates
+        var originCoords = await GeocodeAddressAsync(origin);
+        var destCoords = await GeocodeAddressAsync(destination);
 
-        // Default to 50 miles if API fails (for project resilience)
-        return response?.Routes?.FirstOrDefault()?.Legs?.FirstOrDefault()?.Distance?.Value / 1609.34 ?? 50.0;
+        // Step 2: Get driving distance
+        var response = await client.GetFromJsonAsync<OsrmRouteResponse>(
+            $"https://router.project-osrm.org/route/v1/driving/" +
+            $"{originCoords.Longitude},{originCoords.Latitude};" +
+            $"{destCoords.Longitude},{destCoords.Latitude}?overview=false");
+
+        return response?.Routes?.FirstOrDefault()?.Distance / 1609.34 ?? 50.0; // Convert meters to miles
     }
 
-    private decimal CalculateStandardCost(double distance)
+    private async Task<GeoCoordinates> GeocodeAddressAsync(string address)
     {
-        // $4.99 base + $0.10 per mile
-        return 4.99m + (decimal)distance * 0.10m;
-    }
-
-    private decimal CalculateExpressCost(double distance)
-    {
-        // $9.99 base + $0.15 per mile
-        return 9.99m + (decimal)distance * 0.15m;
-    }
-
-    private decimal CalculateSameDayCost(double distance, string city)
-    {
-        // $24.99 base + $0.30 per mile, with city discounts
-        decimal cost = 24.99m + (decimal)distance * 0.30m;
-        
-        var discountCities = new[] { "New York", "Los Angeles", "Chicago" };
-        if (discountCities.Contains(city, StringComparer.OrdinalIgnoreCase))
+        try
         {
-            cost *= 0.8m; // 20% discount for major cities
+            var client = _httpClientFactory.CreateClient();
+            var response = await client.GetFromJsonAsync<NominatimGeocodeResponse[]>(
+                $"https://nominatim.openstreetmap.org/search?q={Uri.EscapeDataString(address)}&format=json");
+
+            return new GeoCoordinates(
+                double.Parse(response[0].Lat),
+                double.Parse(response[0].Lon)
+            );
         }
-        
-        return cost;
+        catch
+        {
+            // Fallback coordinates (San Francisco)
+            return new GeoCoordinates(37.7749, -122.4194);
+        }
     }
 
-    private string GetDeliveryEstimate(ShippingMethod method, double distance)
+    private string GetDeliveryEstimate(double distance, ShippingMethod method)
     {
         int days = method switch
         {
-            ShippingMethod.Standard => (int)Math.Ceiling(distance / 100) + 1,
-            ShippingMethod.Express => (int)Math.Ceiling(distance / 200) + 1,
-            ShippingMethod.SameDay when distance <= 50 => 0,
-            ShippingMethod.SameDay => 1,
-            _ => 3
+            ShippingMethod.Standard => (int)Math.Max(1, distance / 100),
+            ShippingMethod.Express => (int)Math.Max(1, distance / 200),
+            ShippingMethod.SameDay when distance <= 25 => 0,
+            _ => (int)Math.Max(1, distance / 50)
         };
 
         return days switch
         {
             0 => "Same day delivery",
-            1 => "Next day delivery",
-            _ => $"Estimated {days} business days"
+            1 => "1 business day",
+            _ => $"{days} business days"
         };
     }
 
-    private void ValidateAddress(AddressRequest address)
+    private ShippingOption GetFallbackOption(ShippingMethod method)
     {
-        if (string.IsNullOrWhiteSpace(address.PostalCode))
-            throw new ArgumentException("Postal code is required");
+        // Default prices when API fails
+        return method switch
+        {
+            ShippingMethod.Standard => new ShippingOption(method, 9.99m, "3-5 business days"),
+            ShippingMethod.Express => new ShippingOption(method, 14.99m, "1-2 business days"),
+            _ => new ShippingOption(method, 24.99m, "Same day delivery (if ordered before 12PM)")
+        };
     }
 }
 
-// Google Maps API Response Models
-public class GoogleMapsDistanceResponse
-{
-    public Route[] Routes { get; set; }
-}
-
-public class Route
-{
-    public Leg[] Legs { get; set; }
-}
-
-public class Leg
-{
-    public Distance Distance { get; set; }
-}
-
-public class Distance
-{
-    public double Value { get; set; } // Distance in meters
-}
+// Supporting Models
+public record GeoCoordinates(double Latitude, double Longitude);
+public record NominatimGeocodeResponse(string Lat, string Lon);
+public record OsrmRouteResponse(Route[] Routes);
+public record Route(double Distance);
