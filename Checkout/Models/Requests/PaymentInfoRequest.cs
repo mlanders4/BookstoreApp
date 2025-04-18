@@ -1,44 +1,40 @@
 using System;
 using System.ComponentModel.DataAnnotations;
+using System.Text.RegularExpressions;
 
 namespace Bookstore.Checkout.Models.Requests
 {
     public record PaymentInfoRequest(
         [Required(ErrorMessage = "Card number is required")]
-        [CreditCard(ErrorMessage = "Invalid card number format")]
+        [RegularExpression(@"^\d{13,19}$", ErrorMessage = "Invalid card number format")]
         string CardNumber,
 
         [Required(ErrorMessage = "Cardholder name is required")]
-        [StringLength(100, ErrorMessage = "Name too long")]
+        [StringLength(100, MinimumLength = 2, ErrorMessage = "Name must be 2-100 characters")]
         string CardholderName,
 
         [Required(ErrorMessage = "Expiry date is required")]
-        [RegularExpression(@"^(0[1-9]|1[0-2])\/?([0-9]{2}|[0-9]{4})$", 
-            ErrorMessage = "Use MM/YY or MM/YYYY format")]
+        [RegularExpression(@"^(0[1-9]|1[0-2])\/?([0-9]{2})$", 
+            ErrorMessage = "Use MM/YY format")]
         string ExpiryDate,
 
         [Required(ErrorMessage = "CVV is required")]
         [RegularExpression(@"^\d{3,4}$", ErrorMessage = "CVV must be 3-4 digits")]
-        string Cvv
+        string Cvv,
+
+        // Optional for your Checkout table
+        decimal? Amount = null
     )
     {
-        public DateTime GetParsedExpiryDate()
+        public DateTime GetExpiryDateTime()
         {
-            if (string.IsNullOrWhiteSpace(ExpiryDate))
-                throw new ArgumentException("Expiry date is empty");
-
             var parts = ExpiryDate.Split('/');
-            if (parts.Length != 2)
-                throw new FormatException("Invalid expiry date format");
+            if (parts.Length != 2 || !int.TryParse(parts[1], out var year))
+                throw new ArgumentException("Invalid expiry date format");
 
+            year = 2000 + year; // Convert YY to YYYY
             if (!int.TryParse(parts[0], out var month) || month < 1 || month > 12)
-                throw new ArgumentOutOfRangeException("Invalid month");
-
-            if (!int.TryParse(parts[1], out var year))
-                throw new FormatException("Invalid year");
-
-            // Handle 2-digit year
-            year = year < 100 ? 2000 + year : year;
+                throw new ArgumentException("Invalid month");
 
             return new DateTime(year, month, 1)
                 .AddMonths(1) // Last day of expiry month
@@ -46,11 +42,17 @@ namespace Bookstore.Checkout.Models.Requests
         }
 
         public string GetMaskedCardNumber()
-        {
-            if (string.IsNullOrWhiteSpace(CardNumber) || CardNumber.Length < 4)
-                return "****";
+            => $"****-****-****-{CardNumber[^4..]}";
 
-            return $"****-****-****-{CardNumber[^4..]}";
+        public Dictionary<string, object> ToCheckoutTable(int orderId)
+        {
+            return new Dictionary<string, object>
+            {
+                ["order_id"] = orderId,
+                ["credit_card_number"] = GetMaskedCardNumber(),
+                ["expiry_date"] = GetExpiryDateTime(),
+                ["amount"] = Amount
+            };
         }
     }
 }
