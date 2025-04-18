@@ -4,7 +4,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Bookstore.Checkout.Models.Entities
 {
-    [Table("Ship_indDetails")] // Matches your exact table name
+    [Table("ShippingDetails")] // Explicitly maps to your table
     public class ShippingEntity
     {
         [Key]
@@ -16,11 +16,11 @@ namespace Bookstore.Checkout.Models.Entities
         public int OrderId { get; set; }
 
         [Required]
-        [Column("screw", TypeName = "varchar(100)")] // Assuming this is street address
+        [Column("street", TypeName = "varchar(255)")] // Matches your schema
         public string StreetAddress { get; set; }
 
         [Required]
-        [Column("city", TypeName = "varchar(50)")]
+        [Column("city", TypeName = "varchar(100)")]
         public string City { get; set; }
 
         [Required]
@@ -28,48 +28,48 @@ namespace Bookstore.Checkout.Models.Entities
         public string PostalCode { get; set; }
 
         [Required]
-        [Column("country", TypeName = "varchar(50)")]
+        [Column("country", TypeName = "varchar(100)")]
         public string Country { get; set; }
 
-        [Column("shipping_method", TypeName = "varchar(30)")]
-        public string ShippingMethod { get; set; } // Standard, Express, SameDay
-
-        [Column("shipping_cost", TypeName = "decimal(10,2)")]
+        // Business logic properties (not mapped to DB)
+        [NotMapped]
         public decimal ShippingCost { get; set; }
 
-        [Column("estimated_delivery", TypeName = "varchar(50)")]
-        public string EstimatedDelivery { get; set; }
+        [NotMapped]
+        public string ShippingMethod { get; set; }
 
-        [Column("tracking_number", TypeName = "varchar(50)")]
-        public string TrackingNumber { get; set; }
-
-        [Column("shipped_date", TypeName = "datetime")]
-        public DateTime? ShippedDate { get; set; }
+        [NotMapped]
+        public DateTime? EstimatedDelivery { get; set; }
 
         // Navigation property
         [ForeignKey("OrderId")]
-        public OrderEntity Order { get; set; }
+        public virtual OrderEntity Order { get; set; }
 
-        // Status management
-        public void MarkAsShipped(string trackingNum)
+        // Status tracking methods
+        public void MarkAsShipped(string carrier, string trackingNumber)
         {
-            ShippedDate = DateTime.UtcNow;
-            TrackingNumber = trackingNum;
+            // These would be stored in your business logic layer
+            ShippingMethod = carrier;
+            EstimatedDelivery = CalculateDeliveryDate();
         }
 
-        public bool IsDelivered()
+        private DateTime CalculateDeliveryDate()
         {
-            return ShippedDate.HasValue && 
-                   ShippedDate.Value.AddDays(GetDeliveryDays()) < DateTime.UtcNow;
+            return Country.Equals("USA", StringComparison.OrdinalIgnoreCase)
+                ? DateTime.UtcNow.AddDays(3)  // Domestic
+                : DateTime.UtcNow.AddDays(10); // International
         }
 
-        private int GetDeliveryDays()
+        // Conversion from AddressRequest
+        public static ShippingEntity FromAddressRequest(int orderId, AddressRequest address)
         {
-            return ShippingMethod switch
+            return new ShippingEntity
             {
-                "Express" => 2,
-                "SameDay" => 1,
-                _ => 5 // Standard
+                OrderId = orderId,
+                StreetAddress = address.Street,
+                City = address.City,
+                PostalCode = address.PostalCode,
+                Country = address.Country
             };
         }
     }
