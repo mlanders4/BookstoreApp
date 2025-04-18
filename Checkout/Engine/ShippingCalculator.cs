@@ -9,33 +9,40 @@ namespace Bookstore.Checkout.Engine
     public class ShippingCalculator
     {
         private readonly HttpClient _httpClient;
-        private const string WarehouseAddress = "1144 T St, Lincoln, NE 68588 ";
-        private const string UserAgent = "BookstoreApp";
+        
+        // Your specific warehouse address
+        private const string WarehouseAddress = "1144 T St, Lincoln, NE 68588, USA";
 
         public ShippingCalculator()
         {
             _httpClient = new HttpClient();
-            _httpClient.DefaultRequestHeaders.Add("User-Agent", UserAgent);
+            // Required by OpenStreetMap's usage policy
+            _httpClient.DefaultRequestHeaders.Add("User-Agent", "BookstoreCheckoutSystem/1.0 (your-email@example.com)"); 
         }
 
-        public async Task<ShippingOption> CalculateAsync(AddressRequest address, ShippingMethod method)
+        public async Task<ShippingOptionsResponse> CalculateAsync(AddressRequest address, ShippingMethod method)
         {
             try
             {
-                var destination = $"{address.Street}, {address.City}, {address.PostalCode}, {address.Country}";
+                var destination = FormatDestinationAddress(address);
                 double distance = await GetDistanceMilesAsync(WarehouseAddress, destination);
 
-                return new ShippingOption(
+                return new ShippingOptionsResponse(
                     Method: method,
                     Cost: CalculateCost(distance, method),
                     DeliveryEstimate: GetDeliveryEstimate(distance, method)
                 );
             }
-            catch
+            catch (Exception ex)
             {
-                // Fallback if API fails
+                Console.WriteLine($"Shipping calculation error: {ex.Message}");
                 return GetFallbackOption(method);
             }
+        }
+
+        private string FormatDestinationAddress(AddressRequest address)
+        {
+            return $"{address.Street}, {address.City}, {address.PostalCode}, {address.Country}";
         }
 
         private async Task<double> GetDistanceMilesAsync(string origin, string destination)
