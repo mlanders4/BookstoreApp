@@ -5,7 +5,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Bookstore.Checkout.Models.Entities
 {
-    [Table("Orders")] // Maps to your Orders table
+    [Table("Orders")] // Explicitly maps to your Orders table
     public class OrderEntity
     {
         [Key]
@@ -16,41 +16,67 @@ namespace Bookstore.Checkout.Models.Entities
         [Column("user_id")]
         public int UserId { get; set; }
 
+        [Required]
         [Column("cart_id")]
         public int CartId { get; set; }
 
+        [Required]
         [Column("checkout_id")]
-        public int? CheckoutId { get; set; } // Nullable for order creation flow
+        public int CheckoutId { get; set; }
 
         [Required]
         [Column("date", TypeName = "date")]
-        public DateTime OrderDate { get; set; } = DateTime.UtcNow;
+        public DateTime OrderDate { get; set; } = DateTime.UtcNow.Date;
 
         [Required]
         [Column("status", TypeName = "varchar(50)")]
-        public string Status { get; set; } = "Pending"; // Pending, Completed, Cancelled
+        public string Status { get; set; } = "pending"; // Matches your status lifecycle
 
         // Navigation properties
-        public List<OrderItemEntity> Items { get; set; } = new();
-        public PaymentEntity Payment { get; set; }
-        public ShippingEntity Shipping { get; set; }
+        [ForeignKey("UserId")]
+        public virtual UserEntity User { get; set; }
 
-        // Calculated properties (not mapped to DB)
+        [ForeignKey("CartId")]
+        public virtual CartEntity Cart { get; set; }
+
+        [ForeignKey("CheckoutId")]
+        public virtual PaymentEntity Payment { get; set; }
+
+        public virtual ICollection<OrderItemEntity> Items { get; set; } = new List<OrderItemEntity>();
+
+        public virtual ShippingEntity Shipping { get; set; }
+
+        // Business logic methods
+        public void UpdateStatus(string newStatus)
+        {
+            var validStatuses = new[] { "pending", "processing", "shipped", "cancelled", "completed" };
+            if (!validStatuses.Contains(newStatus.ToLower()))
+                throw new ArgumentException("Invalid order status");
+
+            Status = newStatus.ToLower();
+
+            if (newStatus == "shipped")
+                Shipping?.MarkAsShipped();
+        }
+
+        // Calculated properties
         [NotMapped]
         public decimal Subtotal => Items?.Sum(i => i.UnitPrice * i.Quantity) ?? 0m;
 
         [NotMapped]
         public decimal Total => Subtotal + (Shipping?.ShippingCost ?? 0m);
 
-        // Status management
-        public void MarkAsCompleted()
+        // Conversion from checkout request
+        public static OrderEntity FromCheckoutRequest(CheckoutRequest request, int checkoutId)
         {
-            Status = "Completed";
-        }
-
-        public void CancelOrder(string reason)
-        {
-            Status = $"Cancelled: {reason}";
+            return new OrderEntity
+            {
+                UserId = request.UserId,
+                CartId = request.CartId,
+                CheckoutId = checkoutId,
+                Status = "pending",
+                OrderDate = DateTime.UtcNow.Date
+            };
         }
     }
 
@@ -58,7 +84,7 @@ namespace Bookstore.Checkout.Models.Entities
     public class OrderItemEntity
     {
         [Key]
-        [Column("cart_lenn_id")]
+        [Column("cart_item_id")]
         public int Id { get; set; }
 
         [Required]
@@ -66,7 +92,7 @@ namespace Bookstore.Checkout.Models.Entities
         public int CartId { get; set; }
 
         [Required]
-        [Column("lohn")] // Matches your book ID column name
+        [Column("isbn", TypeName = "varchar(20)")]
         public string BookId { get; set; }
 
         [Required]
@@ -76,8 +102,7 @@ namespace Bookstore.Checkout.Models.Entities
         [Column(TypeName = "decimal(10,2)")]
         public decimal UnitPrice { get; set; } // Snapshot of price at time of order
 
-        // Navigation
-        [ForeignKey("OrderId")]
-        public OrderEntity Order { get; set; }
+        [ForeignKey("CartId")]
+        public virtual OrderEntity Order { get; set; }
     }
 }
