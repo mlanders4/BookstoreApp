@@ -1,124 +1,111 @@
 using System;
-using System.Data;
-using System.Data.SqlClient;
-using Bookstore.Checkout.Models.Entities;
-using Microsoft.Extensions.Logging;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
-namespace Bookstore.Checkout.Accessors
+namespace Bookstore.Checkout.Models.Entities
 {
-    public class OrderAccessor : IOrderAccessor
+    [Table("Orders")]
+    public class OrderEntity
     {
-        private readonly string _connectionString;
-        private readonly ILogger<OrderAccessor> _logger;
+        [Key]
+        [Column("order_id")]
+        public int OrderId { get; set; }
 
-        public OrderAccessor(string connectionString, ILogger<OrderAccessor> logger)
+        [Required]
+        [Column("user_id")]
+        public int UserId { get; set; }
+
+        [Required]
+        [Column("cart_id")]
+        public int CartId { get; set; }
+
+        [Column("checkout_id")]
+        public int? CheckoutId { get; set; }
+
+        [Required]
+        [Column("date", TypeName = "datetime2")]
+        public DateTime OrderDate { get; set; } = DateTime.UtcNow;
+
+        [Required]
+        [Column("status", TypeName = "varchar(20)")]
+        public string Status { get; set; } = OrderStatus.Pending;
+
+        [Column("total_amount", TypeName = "decimal(10,2)")]
+        public decimal? TotalAmount { get; set; }
+
+        // Navigation properties
+        [ForeignKey("CheckoutId")]
+        public virtual PaymentEntity Payment { get; set; }
+
+        [ForeignKey("OrderId")]
+        public virtual ICollection<OrderItemEntity> Items { get; set; } = new List<OrderItemEntity>();
+
+        [ForeignKey("OrderId")]
+        public virtual ShippingEntity Shipping { get; set; }
+
+        // Business logic methods
+        public decimal CalculateTotal()
         {
-            _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            if (Items == null || Items.Count == 0)
+                return 0;
+
+            return Items.Sum(i => i.UnitPrice * i.Quantity) + (Shipping?.ShippingCost ?? 0);
         }
 
-        public async Task<int> CreateOrderAsync(OrderEntity order)
+        public bool CanTransitionTo(string newStatus)
         {
-            using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
-            
-            using var transaction = connection.BeginTransaction();
-            try
+            return (Status, newStatus) switch
             {
-                // 1. Create the order record
-                var orderId = await CreateOrderRecordAsync(connection, transaction, order);
-                
-                // 2. Create order items if they exist
-                if (order.Items?.Count > 0)
-                {
-                    await CreateOrderItemsAsync(connection, transaction, orderId, order.Items);
-                }
-
-                transaction.Commit();
-                _logger.LogInformation("Successfully created order {OrderId} with {ItemCount} items", 
-                    orderId, order.Items?.Count ?? 0);
-                return orderId;
-            }
-            catch (Exception ex)
-            {
-                await transaction.RollbackAsync();
-                _logger.LogError(ex, "Failed to create order for user {UserId}", order.UserId);
-                throw new OrderAccessException("Failed to create order", ex);
-            }
-        }
-
-        private async Task<int> CreateOrderRecordAsync(SqlConnection connection, SqlTransaction transaction, OrderEntity order)
-        {
-            const string sql = @"
-                INSERT INTO Orders (user_id, cart_id, checkout_id, date, status)
-                OUTPUT INSERTED.order_id
-                VALUES (@UserId, @CartId, @CheckoutId, @OrderDate, @Status)";
-
-            using var command = new SqlCommand(sql, connection, transaction);
-            command.Parameters.AddWithValue("@UserId", order.UserId);
-            command.Parameters.AddWithValue("@CartId", order.CartId);
-            command.Parameters.AddWithValue("@CheckoutId", order.CheckoutId);
-            command.Parameters.AddWithValue("@OrderDate", order.OrderDate);
-            command.Parameters.AddWithValue("@Status", order.Status);
-
-            return (int)await command.ExecuteScalarAsync();
-        }
-
-        private async Task CreateOrderItemsAsync(SqlConnection connection, SqlTransaction transaction, 
-            int orderId, ICollection<OrderEntity.OrderItemEntity> items)
-        {
-            const string sql = @"
-                INSERT INTO CartItem (cart_id, isbn, quantity, unit_price)
-                VALUES (@CartId, @Isbn, @Quantity, @UnitPrice)";
-
-            foreach (var item in items)
-            {
-                using var command = new SqlCommand(sql, connection, transaction);
-                command.Parameters.AddWithValue("@CartId", orderId);
-                command.Parameters.AddWithValue("@Isbn", item.BookId);
-                command.Parameters.AddWithValue("@Quantity", item.Quantity);
-                command.Parameters.AddWithValue("@UnitPrice", item.UnitPrice);
-
-                await command.ExecuteNonQueryAsync();
-            }
-        }
-
-        public async Task UpdateOrderStatusAsync(int orderId, string status)
-        {
-            const string sql = @"
-                UPDATE Orders 
-                SET status = @Status 
-                WHERE order_id = @OrderId
-                AND status NOT IN ('completed', 'cancelled')";
-
-            using var connection = new SqlConnection(_connectionString);
-            using var command = new SqlCommand(sql, connection);
-            command.Parameters.AddWithValue("@OrderId", orderId);
-            command.Parameters.AddWithValue("@Status", status);
-
-            try
-            {
-                await connection.OpenAsync();
-                int affectedRows = await command.ExecuteNonQueryAsync();
-                
-                if (affectedRows == 0)
-                {
-                    throw new OrderAccessException($"No order updated - may already be completed/cancelled");
-                }
-                
-                _logger.LogInformation("Updated order {OrderId} status to {Status}", orderId, status);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error updating status for order {OrderId}", orderId);
-                throw new OrderAccessException("Failed to update order status", ex);
-            }
+                (OrderStatus.Pending, OrderStatus.Processing) => true,
+                (OrderStatus.Processing, OrderStatus.Shipped) => true,
+                (OrderStatus.Shipped, OrderStatus.Completed) => true,
+                (_, OrderStatus.Cancelled) => Status != OrderStatus.Completed,
+                _ => false
+            };
         }
     }
 
-    public class OrderAccessException : Exception
+    [Table("CartItem")]
+    public class OrderItemEntity
     {
-        public OrderAccessException(string message, Exception innerException = null) 
+        [Key]
+        [Column("cart_item_id")]
+        public int CartItemId { get; set; }
+
+        [Required]
+        [Column("cart_id")]
+        public int OrderId { get; set; }
+
+        [Required]
+        [Column("isbn", TypeName = "varchar(20)")]
+        public string BookId { get; set; }
+
+        [Required]
+        [Column("quantity")]
+        public int Quantity { get; set; }
+
+        [Required]
+        [Column("unit_price", TypeName = "decimal(10,2)")]
+        public decimal UnitPrice { get; set; }
+
+        // Navigation back to order
+        [ForeignKey("OrderId")]
+        public virtual OrderEntity Order { get; set; }
+    }
+
+    public static class OrderStatus
+    {
+        public const string Pending = "pending";
+        public const string Processing = "processing";
+        public const string Shipped = "shipped";
+        public const string Completed = "completed";
+        public const string Cancelled = "cancelled";
+    }
+
+    public class OrderValidationException : Exception
+    {
+        public OrderValidationException(string message, Exception innerException = null) 
             : base(message, innerException) { }
     }
 }
