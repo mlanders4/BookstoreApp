@@ -18,3 +18,12 @@ public record CheckoutValidationResult(
     public static CheckoutValidationResult Fail(List<CheckoutError> errors) 
         => new(false, errors);
 }
+
+namespace Bookstore.Checkout.Accessors
+{
+    public interface IOrderAccessor
+    {
+        Task<int> CreateOrderAsync(OrderEntity order);
+        Task UpdateOrderStatusAsync(int orderId, string status);
+    }
+}
