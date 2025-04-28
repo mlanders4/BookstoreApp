@@ -1,6 +1,7 @@
 using System;
 using System.Data;
 using System.Data.SqlClient;
+using System.Threading.Tasks;
 using Bookstore.Checkout.Models.Entities;
 using Microsoft.Extensions.Logging;
 
@@ -25,91 +26,117 @@ namespace Bookstore.Checkout.Accessors
             using var transaction = connection.BeginTransaction();
             try
             {
-                // 1. Create the order
+                // 1. Create order record
                 var orderId = await CreateOrderRecordAsync(connection, transaction, order);
                 
-                // 2. Create order items
-                foreach (var item in order.Items)
+                // 2. Bulk insert items
+                if (order.Items?.Count > 0)
                 {
-                    await CreateOrderItemAsync(connection, transaction, orderId, item);
+                    await BulkInsertOrderItemsAsync(connection, transaction, orderId, order.Items);
                 }
 
                 transaction.Commit();
-                _logger.LogInformation("Created order {OrderId} with {ItemCount} items", orderId, order.Items.Count);
+                
+                _logger.LogInformation("Created order {OrderId} with {ItemCount} items for user {UserId}", 
+                    orderId, order.Items?.Count ?? 0, order.UserId);
+                
                 return orderId;
             }
             catch (Exception ex)
             {
-                transaction.Rollback();
-                _logger.LogError(ex, "Failed to create order for user {UserId}", order.UserId);
-                throw new OrderCreationException("Failed to create order", ex);
+                await transaction.RollbackAsync();
+                _logger.LogError(ex, "Failed to create order for user {UserId}. Items: {ItemCount}", 
+                    order.UserId, order.Items?.Count ?? 0);
+                throw new OrderAccessException("Order creation failed", ex);
             }
         }
 
         private async Task<int> CreateOrderRecordAsync(SqlConnection connection, SqlTransaction transaction, OrderEntity order)
         {
             const string sql = @"
-                INSERT INTO Orders (user_id, cart_id, checkout_id, date, status)
+                INSERT INTO Orders (
+                    user_id, 
+                    cart_id, 
+                    date, 
+                    status, 
+                    total_amount
+                )
                 OUTPUT INSERTED.order_id
-                VALUES (@UserId, @CartId, @CheckoutId, @OrderDate, @Status)";
+                VALUES (
+                    @UserId, 
+                    @CartId, 
+                    @OrderDate, 
+                    @Status, 
+                    @TotalAmount
+                )";
 
             using var command = new SqlCommand(sql, connection, transaction);
             command.Parameters.AddRange(new[]
             {
                 new SqlParameter("@UserId", order.UserId),
                 new SqlParameter("@CartId", order.CartId),
-                new SqlParameter("@CheckoutId", order.CheckoutId),
                 new SqlParameter("@OrderDate", order.OrderDate),
-                new SqlParameter("@Status", order.Status)
+                new SqlParameter("@Status", order.Status),
+                new SqlParameter("@TotalAmount", order.TotalAmount ?? (object)DBNull.Value)
             });
 
-            try
-            {
-                return (int)await command.ExecuteScalarAsync();
-            }
-            catch (SqlException ex) when (ex.Number == 2627) // Unique constraint violation
-            {
-                _logger.LogWarning("Order creation conflict for user {UserId}", order.UserId);
-                throw new OrderCreationException("Order already exists", ex);
-            }
+            return (int)await command.ExecuteScalarAsync();
         }
 
-        private async Task CreateOrderItemAsync(SqlConnection connection, SqlTransaction transaction, int orderId, OrderItemEntity item)
+        private async Task BulkInsertOrderItemsAsync(
+            SqlConnection connection, 
+            SqlTransaction transaction,
+            int orderId,
+            ICollection<OrderItemEntity> items)
         {
-            const string sql = @"
-                INSERT INTO CartItem (cart_id, isbn, quantity, unit_price)
-                VALUES (@CartId, @Isbn, @Quantity, @UnitPrice)";
+            using var bulkCopy = new SqlBulkCopy(connection, SqlBulkCopyOptions.Default, transaction)
+            {
+                DestinationTableName = "CartItem",
+                BatchSize = 1000
+            };
 
-            using var command = new SqlCommand(sql, connection, transaction);
-            command.Parameters.AddRange(new[]
-            {
-                new SqlParameter("@CartId", orderId),
-                new SqlParameter("@Isbn", item.BookId),
-                new SqlParameter("@Quantity", item.Quantity),
-                new SqlParameter("@UnitPrice", item.UnitPrice)
-            });
+            // Column mappings
+            bulkCopy.ColumnMappings.Add("OrderId", "cart_id");
+            bulkCopy.ColumnMappings.Add("BookId", "isbn");
+            bulkCopy.ColumnMappings.Add("Quantity", "quantity");
+            bulkCopy.ColumnMappings.Add("UnitPrice", "unit_price");
 
-            try
+            // Prepare DataTable
+            var itemTable = new DataTable();
+            itemTable.Columns.Add("OrderId", typeof(int));
+            itemTable.Columns.Add("BookId", typeof(string));
+            itemTable.Columns.Add("Quantity", typeof(int));
+            itemTable.Columns.Add("UnitPrice", typeof(decimal));
+
+            foreach (var item in items)
             {
-                await command.ExecuteNonQueryAsync();
+                itemTable.Rows.Add(
+                    orderId,
+                    item.BookId,
+                    item.Quantity,
+                    item.UnitPrice
+                );
             }
-            catch (SqlException ex) when (ex.Number == 547) // FK violation
-            {
-                _logger.LogWarning("Invalid book ISBN {Isbn} in order items", item.BookId);
-                throw new OrderCreationException($"Invalid book reference: {item.BookId}", ex);
-            }
+
+            await bulkCopy.WriteToServerAsync(itemTable);
         }
 
         public async Task UpdateOrderStatusAsync(int orderId, string status)
         {
             const string sql = @"
                 UPDATE Orders 
-                SET status = @Status 
+                SET 
+                    status = @Status,
+                    date = CASE 
+                        WHEN @Status = 'completed' THEN GETUTCDATE()
+                        ELSE date
+                    END
                 WHERE order_id = @OrderId
-                AND status NOT IN ('completed', 'cancelled')"; // Prevent invalid transitions
+                AND status NOT IN ('completed', 'cancelled')";
 
             using var connection = new SqlConnection(_connectionString);
             using var command = new SqlCommand(sql, connection);
+            
             command.Parameters.AddRange(new[]
             {
                 new SqlParameter("@OrderId", orderId),
@@ -123,33 +150,70 @@ namespace Bookstore.Checkout.Accessors
                 
                 if (affectedRows == 0)
                 {
-                    _logger.LogWarning("Order status update failed for {OrderId} to {Status}", orderId, status);
-                    throw new OrderUpdateException($"Invalid status transition for order {orderId}");
+                    _logger.LogWarning("Status update blocked for order {OrderId}. Current status may be final.", orderId);
+                    throw new OrderAccessException($"Order {orderId} cannot transition to {status}");
                 }
                 
                 _logger.LogInformation("Updated order {OrderId} to status {Status}", orderId, status);
             }
-            catch (SqlException ex)
+            catch (SqlException ex) when (ex.Number == 547) // FK violation
             {
-                _logger.LogError(ex, "Database error updating order {OrderId}", orderId);
-                throw new OrderUpdateException("Failed to update order status", ex);
+                _logger.LogError(ex, "Invalid order ID {OrderId}", orderId);
+                throw new OrderAccessException($"Order {orderId} not found", ex);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to update status for order {OrderId}", orderId);
+                throw new OrderAccessException("Status update failed", ex);
+            }
+        }
+
+        public async Task<OrderEntity> GetOrderAsync(int orderId)
+        {
+            const string sql = @"
+                SELECT 
+                    order_id, user_id, cart_id, checkout_id, 
+                    date, status, total_amount
+                FROM Orders 
+                WHERE order_id = @OrderId";
+
+            using var connection = new SqlConnection(_connectionString);
+            using var command = new SqlCommand(sql, connection);
+            command.Parameters.AddWithValue("@OrderId", orderId);
+
+            try
+            {
+                await connection.OpenAsync();
+                using var reader = await command.ExecuteReaderAsync();
+                
+                if (!await reader.ReadAsync())
+                {
+                    _logger.LogWarning("Order {OrderId} not found", orderId);
+                    return null;
+                }
+
+                return new OrderEntity
+                {
+                    OrderId = reader.GetInt32(0),
+                    UserId = reader.GetInt32(1),
+                    CartId = reader.GetInt32(2),
+                    CheckoutId = reader.IsDBNull(3) ? null : reader.GetInt32(3),
+                    OrderDate = reader.GetDateTime(4),
+                    Status = reader.GetString(5),
+                    TotalAmount = reader.IsDBNull(6) ? null : reader.GetDecimal(6)
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving order {OrderId}", orderId);
+                throw new OrderAccessException("Order retrieval failed", ex);
             }
         }
     }
 
-    public class OrderCreationException : Exception
+    public class OrderAccessException : Exception
     {
-        public OrderCreationException(string message, Exception innerException = null)
+        public OrderAccessException(string message, Exception innerException = null) 
             : base(message, innerException) { }
-    }
-
-    public class OrderUpdateException : Exception
-    {
-        public OrderUpdateException(string message, Exception innerException = null)
-            : base(message, innerException) { }
-    }
-}
-            }
-        }
     }
 }
