@@ -1,6 +1,0 @@
-namespace Bookstore.Checkout.Contracts;
-
-public interface IPaymentValidator
-{
-    PaymentValidationResult Validate(PaymentInfoRequest payment);
-}
