@@ -1,104 +1,78 @@
+// CheckoutValidator.cs
 using Bookstore.Checkout.Contracts;
-using Bookstore.Checkout.Models.Entities;
 using Bookstore.Checkout.Models.Requests;
 using Bookstore.Checkout.Models.Responses;
-using Bookstore.Checkout.Accessors;
+using Microsoft.Extensions.Logging;
 
 namespace Bookstore.Checkout.Engine;
 
-public class CheckoutEngine : ICheckoutService
+public class CheckoutValidator : ICheckoutValidator
 {
     private readonly IPaymentValidator _paymentValidator;
+    private readonly IInventoryService _inventoryService;
     private readonly IShippingCalculator _shippingCalculator;
-    private readonly IOrderAccessor _orderAccessor;
-    private readonly IPaymentAccessor _paymentAccessor;
-    private readonly IShippingAccessor _shippingAccessor;
-    private readonly ILogger<CheckoutEngine> _logger;
+    private readonly ILogger<CheckoutValidator> _logger;
 
-    public CheckoutEngine(
+    public CheckoutValidator(
         IPaymentValidator paymentValidator,
+        IInventoryService inventoryService,
         IShippingCalculator shippingCalculator,
-        IOrderAccessor orderAccessor,
-        IPaymentAccessor paymentAccessor,
-        IShippingAccessor shippingAccessor,
-        ILogger<CheckoutEngine> logger)
+        ILogger<CheckoutValidator> logger)
     {
         _paymentValidator = paymentValidator;
+        _inventoryService = inventoryService;
         _shippingCalculator = shippingCalculator;
-        _orderAccessor = orderAccessor;
-        _paymentAccessor = paymentAccessor;
-        _shippingAccessor = shippingAccessor;
         _logger = logger;
     }
 
-    public async Task<CheckoutResponse> ProcessCheckoutAsync(CheckoutRequest request)
+    public async Task<CheckoutValidationResult> ValidateAsync(CheckoutRequest request)
     {
+        var errors = new List<CheckoutError>();
+
+        // 1. Validate Payment
+        var paymentValidation = _paymentValidator.Validate(request.Payment);
+        if (!paymentValidation.IsValid)
+        {
+            _logger.LogWarning("Payment validation failed: {Error}", paymentValidation.ErrorMessage);
+            errors.Add(new CheckoutError(paymentValidation.ErrorMessage!, "payment_invalid"));
+        }
+
+        // 2. Validate Inventory
+        if (!await _inventoryService.ValidateItemsAsync(request.Items))
+        {
+            var error = "One or more items are out of stock";
+            _logger.LogWarning(error);
+            errors.Add(new CheckoutError(error, "inventory_unavailable"));
+        }
+
+        // 3. Validate Shipping
         try
         {
-            // 1. Validate Payment
-            var paymentValidation = _paymentValidator.Validate(request.Payment);
-            if (!paymentValidation.IsValid)
+            var shippingOption = await _shippingCalculator.CalculateAsync(
+                request.ShippingAddress, 
+                request.ShippingMethod
+            );
+
+            if (!shippingOption.IsAvailable)
             {
-                _logger.LogWarning("Payment validation failed: {Error}", paymentValidation.ErrorMessage);
-                return CheckoutResponse.Fail(paymentValidation.ErrorMessage!);
+                errors.Add(new CheckoutError(
+                    "Shipping method unavailable", 
+                    "shipping_unavailable"
+                ));
             }
 
-            // 2. Calculate Shipping
-            var shippingCost = _shippingCalculator.Calculate(request.ShippingAddress, request.ShippingMethod);
-            var shippingOption = new ShippingOption(request.ShippingMethod, shippingCost);
-
-            // 3. Create Order
-            var orderEntity = new OrderEntity
-            {
-                UserId = request.UserId,
-                Date = DateTime.UtcNow,
-                Status = "Pending",
-                Items = request.Items.Select(i => new OrderItemEntity
-                {
-                    BookId = i.BookId,
-                    Quantity = i.Quantity
-                }).ToList()
-            };
-
-            // 4. Process Payment
-            var paymentEntity = new PaymentEntity
-            {
-                CreditCardNumber = MaskCardNumber(request.Payment.CardNumber),
-                ExpiryDate = request.Payment.ExpiryDate,
-                Amount = CalculateTotal(request.Items, shippingCost)
-            };
-
-            // 5. Save to Database
-            await _orderAccessor.CreateOrderAsync(orderEntity);
-            await _paymentAccessor.CreatePaymentAsync(paymentEntity);
-            await _shippingAccessor.CreateShippingAsync(new ShippingEntity
-            {
-                OrderId = orderEntity.OrderId,
-                Street = request.ShippingAddress.Street,
-                City = request.ShippingAddress.City,
-                PostalCode = request.ShippingAddress.PostalCode,
-                Country = request.ShippingAddress.Country
-            });
-
-            _logger.LogInformation("Checkout completed for order {OrderId}", orderEntity.OrderId);
-            return CheckoutResponse.Success(orderEntity.OrderId);
+            return errors.Any() 
+                ? CheckoutValidationResult.Fail(errors) 
+                : CheckoutValidationResult.Success(shippingOption.Cost, shippingOption.DeliveryEstimate);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Checkout processing failed");
-            return CheckoutResponse.Fail("An error occurred during checkout");
+            _logger.LogError(ex, "Shipping validation failed");
+            errors.Add(new CheckoutError(
+                "Failed to calculate shipping", 
+                "shipping_calculation_error"
+            ));
+            return CheckoutValidationResult.Fail(errors);
         }
-    }
-
-    private decimal CalculateTotal(List<CartItemRequest> items, decimal shippingCost)
-    {
-        // In real implementation, fetch prices from catalog service
-        return items.Sum(i => i.Quantity * 10.99m) + shippingCost; // Mock price
-    }
-
-    private string MaskCardNumber(string cardNumber)
-    {
-        // For security - only store last 4 digits
-        return $"****-****-****-{cardNumber[^4..]}";
     }
 }
