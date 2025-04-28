@@ -11,3 +11,12 @@ public record PaymentValidationResult(bool IsValid, string? ErrorMessage = null)
     public static PaymentValidationResult Success() => new(true);
     public static PaymentValidationResult Fail(string error) => new(false, error);
 }
+
+namespace Bookstore.Checkout.Accessors
+{
+    public interface IPaymentAccessor
+    {
+        Task<int> CreatePaymentAsync(PaymentEntity payment);
+        Task UpdatePaymentStatusAsync(int checkoutId, string status);
+    }
+}
