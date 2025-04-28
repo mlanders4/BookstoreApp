@@ -1,61 +1,118 @@
 using Bookstore.Checkout.Contracts;
 using Bookstore.Checkout.Models.Requests;
 using Bookstore.Checkout.Models.Responses;
+using Bookstore.Checkout.Models.Entities;
 
 namespace Bookstore.Checkout.Engine;
 
-public class CheckoutValidator
+public class CheckoutEngine : ICheckoutService
 {
     private readonly IPaymentValidator _paymentValidator;
     private readonly IShippingCalculator _shippingCalculator;
+    private readonly IOrderAccessor _orderAccessor;
+    private readonly IPaymentAccessor _paymentAccessor;
+    private readonly IShippingAccessor _shippingAccessor;
 
-    public CheckoutValidator(
+    public CheckoutEngine(
         IPaymentValidator paymentValidator,
-        IShippingCalculator shippingCalculator)
+        IShippingCalculator shippingCalculator,
+        IOrderAccessor orderAccessor,
+        IPaymentAccessor paymentAccessor,
+        IShippingAccessor shippingAccessor)
     {
         _paymentValidator = paymentValidator;
         _shippingCalculator = shippingCalculator;
+        _orderAccessor = orderAccessor;
+        _paymentAccessor = paymentAccessor;
+        _shippingAccessor = shippingAccessor;
     }
 
-    public async Task<CheckoutValidationResult> ValidateAsync(CheckoutRequest request)
+    public async Task<CheckoutResponse> ProcessCheckoutAsync(CheckoutRequest request)
     {
+        // ==== 1. VALIDATION PHASE ====
         var errors = new List<CheckoutError>();
 
-        // 1. Validate Payment (using your existing IPaymentValidator)
+        // Payment Validation (using existing IPaymentValidator)
         var paymentValidation = _paymentValidator.Validate(request.Payment);
         if (!paymentValidation.IsValid)
         {
             errors.Add(new CheckoutError(paymentValidation.ErrorMessage!, "payment_invalid"));
         }
 
-        // 2. Validate Shipping (using your existing IShippingCalculator)
-        var shippingOption = await _shippingCalculator.CalculateAsync(
-            request.ShippingAddress, 
-            request.ShippingMethod
-        );
-
-        if (!shippingOption.IsAvailable)
+        // Shipping Validation (using existing IShippingCalculator)
+        try
         {
-            errors.Add(new CheckoutError("Shipping method unavailable", "shipping_unavailable"));
+            var shippingOption = await _shippingCalculator.CalculateAsync(
+                request.ShippingAddress, 
+                request.ShippingMethod
+            );
+            if (!shippingOption.IsAvailable)
+            {
+                errors.Add(new CheckoutError("Shipping unavailable", "shipping_error"));
+            }
+        }
+        catch
+        {
+            errors.Add(new CheckoutError("Failed to calculate shipping", "shipping_calculation_failed"));
         }
 
-        // Return results
-        return errors.Any() 
-            ? CheckoutValidationResult.Fail(errors) 
-            : CheckoutValidationResult.Success(shippingOption.Cost, shippingOption.DeliveryEstimate);
-    }
-}
+        // Fail fast if validation errors exist
+        if (errors.Any())
+        {
+            return CheckoutResponse.Failure(errors);
+        }
 
-// Add this record to your existing Contracts/IPaymentValidator.cs file
-public record CheckoutValidationResult(
-    bool IsValid,
-    List<CheckoutError>? Errors = null,
-    decimal? CalculatedShippingCost = null,
-    string? ShippingEstimate = null
-)
-{
-    public static CheckoutValidationResult Success(decimal cost, string estimate) 
-        => new(true, null, cost, estimate);
-    public static CheckoutValidationResult Fail(List<CheckoutError> errors) 
-        => new(false, errors);
+        // ==== 2. PROCESSING PHASE ====
+        try
+        {
+            // Order Creation (your existing code)
+            var orderEntity = new OrderEntity
+            {
+                UserId = request.UserId,
+                Date = DateTime.UtcNow,
+                Status = "Pending",
+                Items = request.Items.Select(i => new OrderItemEntity
+                {
+                    BookId = i.BookId,
+                    Quantity = i.Quantity
+                }).ToList()
+            };
+
+            // Payment Processing
+            var paymentEntity = new PaymentEntity
+            {
+                CreditCardNumber = MaskCardNumber(request.Payment.CardNumber),
+                ExpiryDate = request.Payment.ExpiryDate,
+                Amount = CalculateTotal(request.Items, shippingOption.Cost)
+            };
+
+            // Database Persistence
+            await _orderAccessor.CreateOrderAsync(orderEntity);
+            await _paymentAccessor.CreatePaymentAsync(paymentEntity);
+            await _shippingAccessor.CreateShippingAsync(new ShippingEntity
+            {
+                OrderId = orderEntity.OrderId,
+                Street = request.ShippingAddress.Street,
+                City = request.ShippingAddress.City,
+                PostalCode = request.ShippingAddress.PostalCode,
+                Country = request.ShippingAddress.Country
+            });
+
+            return CheckoutResponse.Success(orderEntity.OrderId);
+        }
+        catch (Exception ex)
+        {
+            return CheckoutResponse.Fail("Checkout processing failed");
+        }
+    }
+
+    private decimal CalculateTotal(List<CartItemRequest> items, decimal shippingCost)
+    {
+        return items.Sum(i => i.Quantity * 10.99m) + shippingCost; // Mock price
+    }
+
+    private string MaskCardNumber(string cardNumber)
+    {
+        return $"****-****-****-{cardNumber[^4..]}";
+    }
 }
