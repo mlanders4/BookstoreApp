@@ -1,29 +1,6 @@
 namespace Bookstore.Checkout.Contracts;
 
-public interface ICheckoutValidatorService
+public interface ICheckoutService
 {
-    Task<CheckoutValidationResult> ValidateAsync(CheckoutRequest request);
-}
-
-public record CheckoutValidationResult(
-    bool IsValid,
-    List<CheckoutError>? Errors = null,
-    decimal? CalculatedShippingCost = null,
-    string? ShippingEstimate = null
-)
-{
-    public static CheckoutValidationResult Success(decimal shippingCost, string estimate) 
-        => new(true, null, shippingCost, estimate);
-
-    public static CheckoutValidationResult Fail(List<CheckoutError> errors) 
-        => new(false, errors);
-}
-
-namespace Bookstore.Checkout.Accessors
-{
-    public interface IOrderAccessor
-    {
-        Task<int> CreateOrderAsync(OrderEntity order);
-        Task UpdateOrderStatusAsync(int orderId, string status);
-    }
+    Task<CheckoutResponse> ProcessCheckoutAsync(CheckoutRequest request);
 }
