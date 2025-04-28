@@ -1,20 +1,24 @@
 using System;
 using System.Net.Http;
 using System.Threading.Tasks;
+using Bookstore.Checkout.Contracts; // Added for ShippingMethod enum
 using Bookstore.Checkout.Models.Requests;
 using Bookstore.Checkout.Models.Responses;
+using Microsoft.Extensions.Logging; // Added for ILogger
 
 namespace Bookstore.Checkout.Engine
 {
-    public class ShippingCalculator
+    public class ShippingCalculator : IShippingCalculator
     {
         private readonly HttpClient _httpClient;
+        private readonly ILogger<ShippingCalculator> _logger; // Added logging
         
         // Your specific warehouse address
         private const string WarehouseAddress = "1144 T St, Lincoln, NE 68588, USA";
 
-        public ShippingCalculator()
+        public ShippingCalculator(ILogger<ShippingCalculator> logger) // Updated constructor
         {
+            _logger = logger;
             _httpClient = new HttpClient();
             // Required by OpenStreetMap's usage policy
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "BookstoreCheckoutSystem/1.0 (your-email@example.com)"); 
@@ -35,7 +39,7 @@ namespace Bookstore.Checkout.Engine
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Shipping calculation error: {ex.Message}");
+                _logger.LogError(ex, "Shipping calculation failed for {Address}", address.ToSingleLine()); // Improved error logging
                 return GetFallbackOption(method);
             }
         }
@@ -47,35 +51,64 @@ namespace Bookstore.Checkout.Engine
 
         private async Task<double> GetDistanceMilesAsync(string origin, string destination)
         {
-            // Step 1: Geocode addresses
-            var originCoords = await GeocodeAddressAsync(origin);
-            var destCoords = await GeocodeAddressAsync(destination);
+            try 
+            {
+                // Step 1: Geocode addresses
+                var originCoords = await GeocodeAddressAsync(origin);
+                var destCoords = await GeocodeAddressAsync(destination);
 
-            // Step 2: Get driving distance
-            var response = await _httpClient.GetAsync(
-                $"https://router.project-osrm.org/route/v1/driving/" +
-                $"{originCoords.Longitude},{originCoords.Latitude};" +
-                $"{destCoords.Longitude},{destCoords.Latitude}?overview=false");
+                // Step 2: Get driving distance
+                var response = await _httpClient.GetAsync(
+                    $"https://router.project-osrm.org/route/v1/driving/" +
+                    $"{originCoords.Longitude},{originCoords.Latitude};" +
+                    $"{destCoords.Longitude},{destCoords.Latitude}?overview=false");
 
-            var content = await response.Content.ReadAsStringAsync();
-            var distance = System.Text.Json.JsonSerializer.Deserialize<OsrmResponse>(content)?
-                .Routes?[0].Distance / 1609.34; // Convert meters to miles
+                response.EnsureSuccessStatusCode(); // Throws if HTTP request failed
 
-            return distance ?? 50.0; // Default fallback distance
+                var content = await response.Content.ReadAsStringAsync();
+                var osrmResponse = System.Text.Json.JsonSerializer.Deserialize<OsrmResponse>(content);
+                
+                if (osrmResponse?.Routes == null || osrmResponse.Routes.Length == 0)
+                {
+                    throw new Exception("No route data received from OSRM");
+                }
+
+                return osrmResponse.Routes[0].Distance / 1609.34; // Convert meters to miles
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to calculate distance from {Origin} to {Destination}", origin, destination);
+                return 50.0; // Default fallback distance
+            }
         }
 
         private async Task<GeoCoordinates> GeocodeAddressAsync(string address)
         {
-            var response = await _httpClient.GetAsync(
-                $"https://nominatim.openstreetmap.org/search?q={Uri.EscapeDataString(address)}&format=json");
+            try
+            {
+                var response = await _httpClient.GetAsync(
+                    $"https://nominatim.openstreetmap.org/search?q={Uri.EscapeDataString(address)}&format=json");
 
-            var content = await response.Content.ReadAsStringAsync();
-            var result = System.Text.Json.JsonSerializer.Deserialize<NominatimResponse[]>(content);
+                response.EnsureSuccessStatusCode();
 
-            return new GeoCoordinates(
-                double.Parse(result[0].Lat),
-                double.Parse(result[0].Lon)
-            );
+                var content = await response.Content.ReadAsStringAsync();
+                var result = System.Text.Json.JsonSerializer.Deserialize<NominatimResponse[]>(content);
+
+                if (result == null || result.Length == 0)
+                {
+                    throw new Exception("No geocoding results found");
+                }
+
+                return new GeoCoordinates(
+                    double.Parse(result[0].Lat),
+                    double.Parse(result[0].Lon)
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Geocoding failed for address: {Address}", address);
+                throw; // Re-throw to be handled by CalculateAsync
+            }
         }
 
         private decimal CalculateCost(double distance, ShippingMethod method)
@@ -85,7 +118,7 @@ namespace Bookstore.Checkout.Engine
                 ShippingMethod.Standard => 4.99m + (decimal)distance * 0.10m,
                 ShippingMethod.Express => 9.99m + (decimal)distance * 0.15m,
                 ShippingMethod.SameDay => 24.99m + (decimal)distance * 0.30m,
-                _ => 9.99m
+                _ => throw new ArgumentOutOfRangeException(nameof(method), // Fail fast on invalid method
             };
         }
 
@@ -96,17 +129,20 @@ namespace Bookstore.Checkout.Engine
                 ShippingMethod.Standard => $"{(int)Math.Ceiling(distance / 100)}-{(int)Math.Ceiling(distance / 100) + 1} business days",
                 ShippingMethod.Express => $"1-{(int)Math.Ceiling(distance / 200) + 1} business days",
                 ShippingMethod.SameDay when distance <= 25 => "Same day delivery",
+                ShippingMethod.SameDay => "Next business day",
                 _ => "3-5 business days"
             };
         }
 
-        private ShippingOption GetFallbackOption(ShippingMethod method)
+        private ShippingOptionsResponse GetFallbackOption(ShippingMethod method)
         {
+            _logger.LogWarning("Using fallback shipping option for {Method}", method);
+            
             return method switch
             {
-                ShippingMethod.Standard => new ShippingOption(method, 9.99m, "3-5 business days"),
-                ShippingMethod.Express => new ShippingOption(method, 14.99m, "1-2 business days"),
-                _ => new ShippingOption(method, 24.99m, "Same day (if ordered before 12PM)")
+                ShippingMethod.Standard => new ShippingOptionsResponse(method, 9.99m, "3-5 business days"),
+                ShippingMethod.Express => new ShippingOptionsResponse(method, 14.99m, "1-2 business days"),
+                _ => new ShippingOptionsResponse(method, 24.99m, "Same day (if ordered before 12PM)")
             };
         }
 
