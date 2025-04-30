@@ -18,31 +18,37 @@ namespace Bookstore.Checkout.Infrastructure.Logging
 
         public async Task Invoke(HttpContext context)
         {
-            var stopwatch = Stopwatch.StartNew();
+            var correlationId = context.Request.Headers["X-Correlation-ID"].FirstOrDefault() 
+                ?? Guid.NewGuid().ToString();
             
-            try
+            using (_logger.BeginScope(new Dictionary<string, object>
             {
-                await _next(context);
-                stopwatch.Stop();
-
-                _logger.LogInformation(
-                    "HTTP {Method} {Path} completed with {StatusCode} in {ElapsedMs}ms",
-                    context.Request.Method,
-                    context.Request.Path,
-                    context.Response.StatusCode,
-                    stopwatch.ElapsedMilliseconds);
-            }
-            catch (Exception ex)
+                ["CorrelationId"] = correlationId,
+                ["RequestPath"] = context.Request.Path
+            }))
             {
-                stopwatch.Stop();
-                _logger.LogError(
-                    ex,
-                    "HTTP {Method} {Path} failed after {ElapsedMs}ms",
-                    context.Request.Method,
-                    context.Request.Path,
-                    stopwatch.ElapsedMilliseconds);
+                var stopwatch = Stopwatch.StartNew();
                 
-                throw;
+                try
+                {
+                    context.Response.Headers.Add("X-Correlation-ID", correlationId);
+                    await _next(context);
+                    stopwatch.Stop();
+
+                    _logger.LogInformation(
+                        "Request completed in {ElapsedMs}ms with status {StatusCode}",
+                        stopwatch.ElapsedMilliseconds,
+                        context.Response.StatusCode);
+                }
+                catch (Exception ex)
+                {
+                    stopwatch.Stop();
+                    _logger.LogError(
+                        ex,
+                        "Request failed after {ElapsedMs}ms",
+                        stopwatch.ElapsedMilliseconds);
+                    throw;
+                }
             }
         }
     }
