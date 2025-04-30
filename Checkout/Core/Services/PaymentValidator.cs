@@ -1,24 +1,29 @@
+using Bookstore.Checkout.Contracts;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text.RegularExpressions;
-using Bookstore.Checkout.Contracts;
 
-namespace Bookstore.Checkout.Engine
+namespace Bookstore.Checkout.Core.Services
 {
     public class PaymentValidator : IPaymentValidator
     {
         private readonly ILogger<PaymentValidator> _logger;
+        private readonly IConfiguration _config;
         private static readonly Regex _cardNumberRegex = new(@"^\d{13,19}$", RegexOptions.Compiled);
         private static readonly Regex _cvvRegex = new(@"^\d{3,4}$", RegexOptions.Compiled);
         private static readonly Regex _expiryRegex = new(@"^(0[1-9]|1[0-2])\/?([0-9]{2,4})$", RegexOptions.Compiled);
 
-        public PaymentValidator(ILogger<PaymentValidator> logger)
+        public PaymentValidator(ILogger<PaymentValidator> logger, IConfiguration config)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _config = config ?? throw new ArgumentNullException(nameof(config));
         }
 
-        public PaymentValidationResult Validate(PaymentInfoRequest payment)
+        public PaymentValidationResult Validate(PaymentMethodDto payment)
         {
             if (payment == null)
             {
@@ -29,11 +34,12 @@ namespace Bookstore.Checkout.Engine
             }
 
             var errors = new List<CheckoutError>();
-
             ValidateCardNumber(payment.CardNumber, errors);
             ValidateCardholderName(payment.CardholderName, errors);
             ValidateExpiryDate(payment.ExpiryDate, errors);
             ValidateCvv(payment.Cvv, payment.CardNumber, errors);
+            ValidateCountryRestrictions(payment.BillingAddress?.Country, errors);
+            ValidateCardType(payment.CardNumber, errors);
 
             if (errors.Count > 0)
             {
@@ -41,10 +47,7 @@ namespace Bookstore.Checkout.Engine
                 return PaymentValidationResult.Fail(
                     ErrorCodes.PaymentInvalid,
                     "Payment validation failed",
-                    new Dictionary<string, object>
-                    {
-                        ["errors"] = errors
-                    });
+                    new Dictionary<string, object> { ["errors"] = errors });
             }
 
             _logger.LogInformation("Payment validated successfully for card ending {Last4}", 
@@ -78,14 +81,18 @@ namespace Bookstore.Checkout.Engine
                     ErrorCodes.PaymentInvalid,
                     "Invalid card number"));
             }
+        }
 
-            // Additional card type validation
-            var cardType = DetectCardType(cleanNumber);
-            if (cardType == CardType.Unknown)
+        private void ValidateCardType(string cardNumber, List<CheckoutError> errors)
+        {
+            var cardType = DetectCardType(cardNumber);
+            var allowedCards = _config.GetSection("Payment:AcceptedCardTypes").Get<string[]>();
+            
+            if (allowedCards == null || !allowedCards.Contains(cardType.ToString()))
             {
                 errors.Add(CheckoutError.Create(
-                    ErrorCodes.PaymentInvalid,
-                    "Unsupported card type"));
+                    ErrorCodes.UnsupportedCard,
+                    $"We don't accept {cardType} cards"));
             }
         }
 
@@ -174,6 +181,20 @@ namespace Bookstore.Checkout.Engine
             }
         }
 
+        private void ValidateCountryRestrictions(string country, List<CheckoutError> errors)
+        {
+            if (string.IsNullOrWhiteSpace(country)) return;
+
+            var blockedCountries = _config.GetSection("Payment:BlockedCountries").Get<string[]>();
+            if (blockedCountries?.Contains(country, StringComparer.OrdinalIgnoreCase) == true)
+            {
+                errors.Add(CheckoutError.Create(
+                    ErrorCodes.PaymentInvalid,
+                    $"We cannot accept payments from {country}",
+                    new Dictionary<string, object> { ["country"] = country }));
+            }
+        }
+
         private static bool TryParseExpiryDate(string input, out DateTime expiryDate)
         {
             expiryDate = DateTime.MinValue;
@@ -183,7 +204,6 @@ namespace Bookstore.Checkout.Engine
                 if (DateTime.TryParseExact(input, formats, CultureInfo.InvariantCulture, 
                     DateTimeStyles.None, out var parsedDate))
                 {
-                    // Convert to last day of expiry month
                     expiryDate = new DateTime(parsedDate.Year, parsedDate.Month, 1)
                         .AddMonths(1)
                         .AddDays(-1);
