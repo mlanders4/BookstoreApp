@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Catalog.Model;
+using Catalog.Accessor;
 using Catalog.Accessor;
 
 namespace Catalog.Engine
