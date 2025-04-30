@@ -13,23 +13,30 @@ namespace Bookstore.Checkout.Data
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
-            // Order configuration
-            modelBuilder.Entity<Order>(entity =>
+            // Map Order to existing table
+            modelBuilder.Entity<Order>(entity => 
             {
                 entity.ToTable("Orders");
-                entity.Property(o => o.Id).HasColumnName("order_id");
-                entity.HasOne(o => o.Payment)
-                      .WithOne()
-                      .HasForeignKey<Payment>(p => p.OrderId);
-                entity.HasOne(o => o.ShippingDetail)
-                      .WithOne()
-                      .HasForeignKey<ShippingDetail>(s => s.OrderId);
+                entity.Property(o => o.Id)
+                    .HasColumnName("order_id")
+                    .HasConversion(
+                        v => v.ToString(),  // Guid to string
+                        v => Guid.Parse(v));
             });
 
-            // SQL Server GUID handling
-            modelBuilder.Entity<Order>()
-                .Property(o => o.Id)
-                .HasDefaultValueSql("NEWID()");
+            // Treat other tables as read-only
+            modelBuilder.Entity<Payment>(entity => 
+            {
+                entity.ToTable("Checkout");
+                entity.HasNoKey();
+            });
+
+            // Configure ShippingDetails if needed
+            modelBuilder.Entity<ShippingDetail>(entity =>
+            {
+                entity.ToTable("ShippingDetails");
+                entity.HasNoKey();
+            });
         }
     }
 }
