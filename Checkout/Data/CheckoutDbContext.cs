@@ -5,52 +5,57 @@ namespace Bookstore.Checkout.Data
 {
     public class CheckoutDbContext : DbContext
     {
-        public DbSet<Order> Orders { get; set; }
-        public DbSet<OrderItem> OrderItems { get; set; }
-        public DbSet<Payment> Payments { get; set; }
-        public DbSet<Shipping> Shippings { get; set; }
-
         public CheckoutDbContext(DbContextOptions<CheckoutDbContext> options) 
             : base(options) { }
 
+        public DbSet<Book> Books { get; set; }
+        public DbSet<Cart> Carts { get; set; }
+        public DbSet<CartItem> CartItems { get; set; }
+        public DbSet<Checkout> Checkouts { get; set; }
+        public DbSet<Order> Orders { get; set; }
+        public DbSet<ShippingDetail> ShippingDetails { get; set; }
+        public DbSet<User> Users { get; set; }
+        public DbSet<Rating> Ratings { get; set; }
+        public DbSet<Sale> Sales { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
-            // Order configuration
+            // Book Entity
+            modelBuilder.Entity<Book>(entity =>
+            {
+                entity.ToTable("Book");
+                entity.HasKey(b => b.ISBN);
+                entity.Property(b => b.ISBN).HasColumnName("isbn");
+                entity.HasOne(b => b.Sale)
+                      .WithMany()
+                      .HasForeignKey(b => b.SaleId);
+            });
+
+            // Order Entity
             modelBuilder.Entity<Order>(entity =>
             {
-                entity.HasKey(o => o.Id);
-                entity.Property(o => o.Id).ValueGeneratedOnAdd();
-                entity.HasMany(o => o.Items)
-                      .WithOne()
-                      .HasForeignKey(i => i.OrderId);
+                entity.ToTable("Orders");
+                entity.Property(o => o.Id).HasColumnName("order_id");
+                entity.HasOne(o => o.User)
+                      .WithMany()
+                      .HasForeignKey(o => o.UserId);
+                entity.HasOne(o => o.Cart)
+                      .WithMany()
+                      .HasForeignKey(o => o.CartId);
+                entity.HasOne(o => o.Checkout)
+                      .WithMany()
+                      .HasForeignKey(o => o.CheckoutId);
             });
 
-            // OrderItem configuration
-            modelBuilder.Entity<OrderItem>(entity =>
-            {
-                entity.HasKey(i => i.Id);
-                entity.Property(i => i.Id).ValueGeneratedOnAdd();
-            });
+            // Configure GUID handling for SQL Server
+            modelBuilder.Entity<Order>()
+                .Property(o => o.Id)
+                .HasDefaultValueSql("NEWID()");
 
-            // Payment configuration
-            modelBuilder.Entity<Payment>(entity =>
-            {
-                entity.HasKey(p => p.Id);
-                entity.Property(p => p.Id).ValueGeneratedOnAdd();
-                entity.HasOne(p => p.Order)
-                      .WithOne(o => o.Payment)
-                      .HasForeignKey<Payment>(p => p.OrderId);
-            });
-
-            // Shipping configuration
-            modelBuilder.Entity<Shipping>(entity =>
-            {
-                entity.HasKey(s => s.Id);
-                entity.Property(s => s.Id).ValueGeneratedOnAdd();
-                entity.HasOne(s => s.Order)
-                      .WithOne(o => o.Shipping)
-                      .HasForeignKey<Shipping>(s => s.OrderId);
-            });
+            // Other entity configurations...
+            modelBuilder.Entity<ShippingDetail>().ToTable("ShippingDetails");
+            modelBuilder.Entity<CartItem>().ToTable("CartItem");
+            modelBuilder.Entity<Checkout>().ToTable("Checkout");
         }
     }
 }
