@@ -1,9 +1,10 @@
+using Bookstore.Checkout.Data.Entities;
+using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Data;
-using System.Data.SqlClient;
 using System.Threading.Tasks;
-using Bookstore.Checkout.Models.Entities;
-using Microsoft.Extensions.Logging;
 
 namespace Bookstore.Checkout.Accessors
 {
@@ -12,127 +13,54 @@ namespace Bookstore.Checkout.Accessors
         private readonly string _connectionString;
         private readonly ILogger<OrderAccessor> _logger;
 
-        public OrderAccessor(string connectionString, ILogger<OrderAccessor> logger)
+        public OrderAccessor(IConfiguration config, ILogger<OrderAccessor> logger)
         {
-            _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
+            _connectionString = config?.GetConnectionString("CheckoutDB") ?? 
+                throw new ArgumentNullException(nameof(config));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public async Task<int> CreateOrderAsync(OrderEntity order)
+        public async Task<Guid> CreateOrderAsync(Order order)
         {
+            if (order == null) throw new ArgumentNullException(nameof(order));
+            if (order.Id == Guid.Empty) order.Id = Guid.NewGuid();
+
             using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
             
-            using var transaction = connection.BeginTransaction();
+            using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
             try
             {
                 // 1. Create order record
-                var orderId = await CreateOrderRecordAsync(connection, transaction, order);
+                var orderId = await InsertOrderAsync(connection, transaction, order);
                 
-                // 2. Bulk insert items
+                // 2. Add items if present
                 if (order.Items?.Count > 0)
                 {
-                    await BulkInsertOrderItemsAsync(connection, transaction, orderId, order.Items);
+                    await BulkInsertItemsAsync(connection, transaction, orderId, order.Items);
                 }
 
                 transaction.Commit();
-                
-                _logger.LogInformation("Created order {OrderId} with {ItemCount} items for user {UserId}", 
-                    orderId, order.Items?.Count ?? 0, order.UserId);
+                _logger.LogInformation("Created order {OrderId} with {ItemCount} items", 
+                    orderId, order.Items?.Count ?? 0);
                 
                 return orderId;
             }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                _logger.LogError(ex, "Failed to create order for user {UserId}. Items: {ItemCount}", 
-                    order.UserId, order.Items?.Count ?? 0);
+                _logger.LogError(ex, "Failed to create order");
                 throw new OrderAccessException("Order creation failed", ex);
             }
         }
 
-        private async Task<int> CreateOrderRecordAsync(SqlConnection connection, SqlTransaction transaction, OrderEntity order)
-        {
-            const string sql = @"
-                INSERT INTO Orders (
-                    user_id, 
-                    cart_id, 
-                    date, 
-                    status, 
-                    total_amount
-                )
-                OUTPUT INSERTED.order_id
-                VALUES (
-                    @UserId, 
-                    @CartId, 
-                    @OrderDate, 
-                    @Status, 
-                    @TotalAmount
-                )";
-
-            using var command = new SqlCommand(sql, connection, transaction);
-            command.Parameters.AddRange(new[]
-            {
-                new SqlParameter("@UserId", order.UserId),
-                new SqlParameter("@CartId", order.CartId),
-                new SqlParameter("@OrderDate", order.OrderDate),
-                new SqlParameter("@Status", order.Status),
-                new SqlParameter("@TotalAmount", order.TotalAmount ?? (object)DBNull.Value)
-            });
-
-            return (int)await command.ExecuteScalarAsync();
-        }
-
-        private async Task BulkInsertOrderItemsAsync(
-            SqlConnection connection, 
-            SqlTransaction transaction,
-            int orderId,
-            ICollection<OrderItemEntity> items)
-        {
-            using var bulkCopy = new SqlBulkCopy(connection, SqlBulkCopyOptions.Default, transaction)
-            {
-                DestinationTableName = "CartItem",
-                BatchSize = 1000
-            };
-
-            // Column mappings
-            bulkCopy.ColumnMappings.Add("OrderId", "cart_id");
-            bulkCopy.ColumnMappings.Add("BookId", "isbn");
-            bulkCopy.ColumnMappings.Add("Quantity", "quantity");
-            bulkCopy.ColumnMappings.Add("UnitPrice", "unit_price");
-
-            // Prepare DataTable
-            var itemTable = new DataTable();
-            itemTable.Columns.Add("OrderId", typeof(int));
-            itemTable.Columns.Add("BookId", typeof(string));
-            itemTable.Columns.Add("Quantity", typeof(int));
-            itemTable.Columns.Add("UnitPrice", typeof(decimal));
-
-            foreach (var item in items)
-            {
-                itemTable.Rows.Add(
-                    orderId,
-                    item.BookId,
-                    item.Quantity,
-                    item.UnitPrice
-                );
-            }
-
-            await bulkCopy.WriteToServerAsync(itemTable);
-        }
-
-        public async Task UpdateOrderStatusAsync(int orderId, string status)
+        public async Task UpdateOrderStatusAsync(Guid orderId, string status)
         {
             const string sql = @"
                 UPDATE Orders 
-                SET 
-                    status = @Status,
-                    date = CASE 
-                        WHEN @Status = 'completed' THEN GETUTCDATE()
-                        ELSE date
-                    END
-                WHERE order_id = @OrderId
-                AND status NOT IN ('completed', 'cancelled')";
+                SET Status = @Status,
+                    ModifiedDate = GETUTCDATE()
+                WHERE Id = @OrderId";
 
             using var connection = new SqlConnection(_connectionString);
             using var command = new SqlCommand(sql, connection);
@@ -150,16 +78,8 @@ namespace Bookstore.Checkout.Accessors
                 
                 if (affectedRows == 0)
                 {
-                    _logger.LogWarning("Status update blocked for order {OrderId}. Current status may be final.", orderId);
-                    throw new OrderAccessException($"Order {orderId} cannot transition to {status}");
+                    throw new OrderAccessException($"Order {orderId} not found");
                 }
-                
-                _logger.LogInformation("Updated order {OrderId} to status {Status}", orderId, status);
-            }
-            catch (SqlException ex) when (ex.Number == 547) // FK violation
-            {
-                _logger.LogError(ex, "Invalid order ID {OrderId}", orderId);
-                throw new OrderAccessException($"Order {orderId} not found", ex);
             }
             catch (Exception ex)
             {
@@ -168,14 +88,16 @@ namespace Bookstore.Checkout.Accessors
             }
         }
 
-        public async Task<OrderEntity> GetOrderAsync(int orderId)
+        public async Task<Order> GetOrderAsync(Guid orderId)
         {
             const string sql = @"
-                SELECT 
-                    order_id, user_id, cart_id, checkout_id, 
-                    date, status, total_amount
+                SELECT Id, UserId, Status, TotalAmount, CreatedDate 
                 FROM Orders 
-                WHERE order_id = @OrderId";
+                WHERE Id = @OrderId;
+
+                SELECT Id, OrderId, BookId, Quantity, UnitPrice 
+                FROM OrderItems 
+                WHERE OrderId = @OrderId";
 
             using var connection = new SqlConnection(_connectionString);
             using var command = new SqlCommand(sql, connection);
@@ -186,28 +108,109 @@ namespace Bookstore.Checkout.Accessors
                 await connection.OpenAsync();
                 using var reader = await command.ExecuteReaderAsync();
                 
-                if (!await reader.ReadAsync())
+                if (!reader.HasRows || !await reader.ReadAsync())
                 {
-                    _logger.LogWarning("Order {OrderId} not found", orderId);
                     return null;
                 }
 
-                return new OrderEntity
+                var order = new Order
                 {
-                    OrderId = reader.GetInt32(0),
-                    UserId = reader.GetInt32(1),
-                    CartId = reader.GetInt32(2),
-                    CheckoutId = reader.IsDBNull(3) ? null : reader.GetInt32(3),
-                    OrderDate = reader.GetDateTime(4),
-                    Status = reader.GetString(5),
-                    TotalAmount = reader.IsDBNull(6) ? null : reader.GetDecimal(6)
+                    Id = reader.GetGuid(0),
+                    UserId = reader.GetGuid(1),
+                    Status = reader.GetString(2),
+                    TotalAmount = reader.GetDecimal(3),
+                    CreatedDate = reader.GetDateTime(4),
+                    Items = new List<OrderItem>()
                 };
+
+                // Read items if available
+                if (reader.NextResult())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        order.Items.Add(new OrderItem
+                        {
+                            Id = reader.GetGuid(0),
+                            OrderId = reader.GetGuid(1),
+                            BookId = reader.GetString(2),
+                            Quantity = reader.GetInt32(3),
+                            UnitPrice = reader.GetDecimal(4)
+                        });
+                    }
+                }
+
+                return order;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error retrieving order {OrderId}", orderId);
                 throw new OrderAccessException("Order retrieval failed", ex);
             }
+        }
+
+        private async Task<Guid> InsertOrderAsync(SqlConnection connection, SqlTransaction transaction, Order order)
+        {
+            const string sql = @"
+                INSERT INTO Orders (Id, UserId, Status, TotalAmount, CreatedDate) 
+                OUTPUT INSERTED.Id
+                VALUES (@Id, @UserId, @Status, @TotalAmount, @CreatedDate)";
+
+            using var command = new SqlCommand(sql, connection, transaction);
+            command.Parameters.AddRange(new[]
+            {
+                new SqlParameter("@Id", order.Id),
+                new SqlParameter("@UserId", order.UserId),
+                new SqlParameter("@Status", order.Status),
+                new SqlParameter("@TotalAmount", order.TotalAmount),
+                new SqlParameter("@CreatedDate", DateTime.UtcNow)
+            });
+
+            return (Guid)await command.ExecuteScalarAsync();
+        }
+
+        private async Task BulkInsertItemsAsync(
+            SqlConnection connection, 
+            SqlTransaction transaction,
+            Guid orderId,
+            List<OrderItem> items)
+        {
+            using var bulkCopy = new SqlBulkCopy(connection, SqlBulkCopyOptions.Default, transaction)
+            {
+                DestinationTableName = "OrderItems",
+                BatchSize = 1000
+            };
+
+            // Add column mappings
+            bulkCopy.ColumnMappings.Add("Id", "Id");
+            bulkCopy.ColumnMappings.Add("OrderId", "OrderId");
+            bulkCopy.ColumnMappings.Add("BookId", "BookId");
+            bulkCopy.ColumnMappings.Add("Quantity", "Quantity");
+            bulkCopy.ColumnMappings.Add("UnitPrice", "UnitPrice");
+
+            using var itemTable = CreateItemDataTable(orderId, items);
+            await bulkCopy.WriteToServerAsync(itemTable);
+        }
+
+        private DataTable CreateItemDataTable(Guid orderId, List<OrderItem> items)
+        {
+            var table = new DataTable();
+            table.Columns.Add("Id", typeof(Guid));
+            table.Columns.Add("OrderId", typeof(Guid));
+            table.Columns.Add("BookId", typeof(string));
+            table.Columns.Add("Quantity", typeof(int));
+            table.Columns.Add("UnitPrice", typeof(decimal));
+
+            foreach (var item in items)
+            {
+                table.Rows.Add(
+                    item.Id != Guid.Empty ? item.Id : Guid.NewGuid(),
+                    orderId,
+                    item.BookId,
+                    item.Quantity,
+                    item.UnitPrice);
+            }
+
+            return table;
         }
     }
 
