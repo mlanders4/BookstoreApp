@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Microsoft.AspNetCore.Mvc;
-using Catalog.Model;
+using Catalog.Accessor;
 using Catalog.Engine;
 
 namespace Catalog.Controller
