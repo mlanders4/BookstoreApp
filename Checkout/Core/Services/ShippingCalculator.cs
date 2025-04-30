@@ -1,52 +1,64 @@
+using Bookstore.Checkout.Contracts;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Net.Http;
+using System.Text.Json;
 using System.Threading.Tasks;
-using Bookstore.Checkout.Contracts; // Added for ShippingMethod enum
-using Bookstore.Checkout.Models.Requests;
-using Bookstore.Checkout.Models.Responses;
-using Microsoft.Extensions.Logging; // Added for ILogger
 
-namespace Bookstore.Checkout.Engine
+namespace Bookstore.Checkout.Core.Services
 {
     public class ShippingCalculator : IShippingCalculator
     {
         private readonly HttpClient _httpClient;
-        private readonly ILogger<ShippingCalculator> _logger; // Added logging
-        
-        // Your specific warehouse address
-        private const string WarehouseAddress = "1144 T St, Lincoln, NE 68588, USA";
+        private readonly ILogger<ShippingCalculator> _logger;
+        private readonly IConfiguration _config;
 
-        public ShippingCalculator(ILogger<ShippingCalculator> logger) // Updated constructor
+        public ShippingCalculator(
+            IHttpClientFactory httpClientFactory,
+            ILogger<ShippingCalculator> logger,
+            IConfiguration config)
         {
-            _logger = logger;
-            _httpClient = new HttpClient();
-            // Required by OpenStreetMap's usage policy
-            _httpClient.DefaultRequestHeaders.Add("User-Agent", "BookstoreCheckoutSystem/1.0 (your-email@example.com)"); 
+            _httpClient = httpClientFactory?.CreateClient("ShippingAPI") ?? 
+                throw new ArgumentNullException(nameof(httpClientFactory));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _config = config ?? throw new ArgumentNullException(nameof(config));
+            
+            _httpClient.DefaultRequestHeaders.Add("User-Agent", "BookstoreCheckoutSystem");
+            _httpClient.Timeout = TimeSpan.FromSeconds(30);
         }
 
-        public async Task<ShippingOptionsResponse> CalculateAsync(AddressRequest address, ShippingMethod method)
+        public async Task<decimal> CalculateShippingAsync(AddressDto address, int itemCount)
         {
+            if (itemCount <= 0)
+            {
+                throw new ArgumentException("Item count must be positive", nameof(itemCount));
+            }
+
             try
             {
-                var destination = FormatDestinationAddress(address);
-                double distance = await GetDistanceMilesAsync(WarehouseAddress, destination);
+                var warehouseAddress = _config["Shipping:WarehouseAddress"] ?? 
+                    throw new InvalidOperationException("Warehouse address not configured");
+                
+                var destination = FormatAddress(address);
+                var distance = await GetDistanceMilesAsync(warehouseAddress, destination);
+                var rates = _config.GetSection("Shipping:Rates").Get<ShippingRates>() ?? 
+                    throw new InvalidOperationException("Shipping rates not configured");
 
-                return new ShippingOptionsResponse(
-                    Method: method,
-                    Cost: CalculateCost(distance, method),
-                    DeliveryEstimate: GetDeliveryEstimate(distance, method)
-                );
+                return CalculateCost(distance, itemCount, rates);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Shipping calculation failed for {Address}", address.ToSingleLine()); // Improved error logging
-                return GetFallbackOption(method);
+                _logger.LogError(ex, "Shipping calculation failed for {Address}", 
+                    address?.ToSingleLine() ?? "null address");
+                
+                return _config.GetValue<decimal>("Shipping:FallbackRate");
             }
         }
 
-        private string FormatDestinationAddress(AddressRequest address)
+        private string FormatAddress(AddressDto address)
         {
-            return $"{address.Street}, {address.City}, {address.PostalCode}, {address.Country}";
+            return $"{address.Street}, {address.City}, {address.ZipCode}, {address.Country}";
         }
 
         private async Task<double> GetDistanceMilesAsync(string origin, string destination)
@@ -63,10 +75,10 @@ namespace Bookstore.Checkout.Engine
                     $"{originCoords.Longitude},{originCoords.Latitude};" +
                     $"{destCoords.Longitude},{destCoords.Latitude}?overview=false");
 
-                response.EnsureSuccessStatusCode(); // Throws if HTTP request failed
+                response.EnsureSuccessStatusCode();
 
                 var content = await response.Content.ReadAsStringAsync();
-                var osrmResponse = System.Text.Json.JsonSerializer.Deserialize<OsrmResponse>(content);
+                var osrmResponse = JsonSerializer.Deserialize<OsrmResponse>(content);
                 
                 if (osrmResponse?.Routes == null || osrmResponse.Routes.Length == 0)
                 {
@@ -77,8 +89,9 @@ namespace Bookstore.Checkout.Engine
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to calculate distance from {Origin} to {Destination}", origin, destination);
-                return 50.0; // Default fallback distance
+                _logger.LogWarning(ex, "Failed to calculate distance from {Origin} to {Destination}", 
+                    origin, destination);
+                throw new ShippingCalculationException("Distance calculation failed", ex);
             }
         }
 
@@ -91,8 +104,8 @@ namespace Bookstore.Checkout.Engine
 
                 response.EnsureSuccessStatusCode();
 
-                var content = await response.Content.ReadAsStringAsync();
-                var result = System.Text.Json.JsonSerializer.Deserialize<NominatimResponse[]>(content);
+                using var stream = await response.Content.ReadAsStreamAsync();
+                var result = await JsonSerializer.DeserializeAsync<NominatimResponse[]>(stream);
 
                 if (result == null || result.Length == 0)
                 {
@@ -101,55 +114,25 @@ namespace Bookstore.Checkout.Engine
 
                 return new GeoCoordinates(
                     double.Parse(result[0].Lat),
-                    double.Parse(result[0].Lon)
-                );
+                    double.Parse(result[0].Lon));
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Geocoding failed for address: {Address}", address);
-                throw; // Re-throw to be handled by CalculateAsync
+                throw;
             }
         }
 
-        private decimal CalculateCost(double distance, ShippingMethod method)
+        private decimal CalculateCost(double distance, int itemCount, ShippingRates rates)
         {
-            return method switch
-            {
-                ShippingMethod.Standard => 4.99m + (decimal)distance * 0.10m,
-                ShippingMethod.Express => 9.99m + (decimal)distance * 0.15m,
-                ShippingMethod.SameDay => 24.99m + (decimal)distance * 0.30m,
-                _ => throw new ArgumentOutOfRangeException(nameof(method), // Fail fast on invalid method
-            };
-        }
-
-        private string GetDeliveryEstimate(double distance, ShippingMethod method)
-        {
-            return method switch
-            {
-                ShippingMethod.Standard => $"{(int)Math.Ceiling(distance / 100)}-{(int)Math.Ceiling(distance / 100) + 1} business days",
-                ShippingMethod.Express => $"1-{(int)Math.Ceiling(distance / 200) + 1} business days",
-                ShippingMethod.SameDay when distance <= 25 => "Same day delivery",
-                ShippingMethod.SameDay => "Next business day",
-                _ => "3-5 business days"
-            };
-        }
-
-        private ShippingOptionsResponse GetFallbackOption(ShippingMethod method)
-        {
-            _logger.LogWarning("Using fallback shipping option for {Method}", method);
+            var baseRate = rates.Standard.Base + (rates.Standard.PerMile * (decimal)distance);
+            var total = baseRate * itemCount;
             
-            return method switch
-            {
-                ShippingMethod.Standard => new ShippingOptionsResponse(method, 9.99m, "3-5 business days"),
-                ShippingMethod.Express => new ShippingOptionsResponse(method, 14.99m, "1-2 business days"),
-                _ => new ShippingOptionsResponse(method, 24.99m, "Same day (if ordered before 12PM)")
-            };
+            // Apply minimum charge
+            var minimumCharge = _config.GetValue<decimal>("Shipping:MinimumCharge");
+            return Math.Max(total, minimumCharge);
         }
 
-        // Nested helper classes
+        // Supporting classes
         private record GeoCoordinates(double Latitude, double Longitude);
-        private record NominatimResponse(string Lat, string Lon);
-        private record OsrmResponse(Route[] Routes);
-        private record Route(double Distance);
-    }
-}
+        private record Nominatim
