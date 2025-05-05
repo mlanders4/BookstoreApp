@@ -56,4 +56,7 @@ namespace Bookstore.Checkout.Tests.Models.Requests
     // Helper extension for string repeating
     public static class StringExtensions
     {
-        public static string Repeat
+        public static string Repeat(this string value, int count)
+            => string.Concat(Enumerable.Repeat(value, count));
+    }
+}
