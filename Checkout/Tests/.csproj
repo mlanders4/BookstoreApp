@@ -11,6 +11,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\YourMainProject\YourMainProject.csproj" />
+    <ProjectReference Include="..\mlanders4\BookstoreApp.csproj" />
   </ItemGroup>
 </Project>
