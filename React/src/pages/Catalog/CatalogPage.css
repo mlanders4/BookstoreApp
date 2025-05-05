@@ -1,0 +1,258 @@
+#catalog {
+  padding: 50px;
+  background: #fff;
+  font-family: sans-serif;
+  max-width: 1300px;
+  margin: 0 auto;
+  margin-top: 60px;
+}
+
+.search-filter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.search-bar {
+  width: 600px;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  background-color: #f9f9f9;
+  color: #333;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.search-bar:focus,
+.search-bar:hover {
+  border-color: #000000;
+  box-shadow: 0 0 0 2px rgba(109, 90, 207, 0.2);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.filters select {
+  padding: 8px 12px;
+  font-size: 0.72rem;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  background-color: #f9f9f9;
+  color: #333;
+  outline: none;
+  transition: all 0.5s ease;
+  margin: 0 6px;
+}
+
+.filters select:focus,
+.filters select:hover {
+  border-color: #000000; /* your accent color */
+  box-shadow: 0 0 0 2px rgba(109, 90, 207, 0.2);
+  background-color: #ffffff;
+}
+
+.filters button {
+  margin: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.book-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 50px;
+  justify-content: center;
+}
+
+.padding-books {
+  display: flex;
+  justify-content: center; /* optional */
+  padding: 10px 40px; /* or tweak as needed */
+}
+
+.book-card {
+  border: 1px solid #ccc;
+  padding: 10px;
+  text-align: center;
+  border-radius: 12px;
+}
+
+.book-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+
+.book-card img {
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.clickable-image {
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.clickable-image:hover {
+  transform: scale(1.02);
+}
+
+.book-title {
+  font-size: 0.9rem;
+  text-align: left;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.book-title:hover {
+  text-decoration: underline;
+
+}
+
+.book-author {
+  font-size: 0.8rem;
+  text-align: left;
+  font-weight: 400;
+  margin-top: -10px;
+  font-style: italic;
+}
+
+.book-genre {
+  font-size: 0.8rem;
+  text-align: left;
+  font-weight: 400;
+  margin-top: -10px;
+}
+
+.book-rating {
+  font-size: 0.7rem;
+  text-align: left;
+  font-weight: 400;
+  margin-top: -10px;
+}
+
+.learn-more {
+  font-size: 0.7rem;
+  text-align: left;
+  font-weight: 400;
+  margin-top: -10px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.learn-more:hover {
+  text-decoration: none;
+}
+
+.price {
+  margin-top: 10px;
+  font-size: 0.8rem;
+  font-weight: 400;
+  text-align: left;
+}
+
+.plus {
+  font-weight: normal;
+  margin-left: 5px;
+  cursor: pointer;
+}
+
+.plus:hover {
+  font-weight: 800;
+}
+
+.popup-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+}
+
+.popup-content {
+  background: #f9f9f9;
+  color: #000000;
+  padding: 2rem;
+  border-radius: 16px;
+  max-width: 900px;
+  width: 90%;
+  position: relative;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 1);
+  font-family: 'Inter', sans-serif;
+}
+
+.close-popup {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  background: transparent;
+  border: none;
+  color: #000000;
+  font-size: 1.5rem;
+  cursor: pointer;
+  transition: color 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-popup:hover {
+  color: #696969;
+}
+
+.popup-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2rem;
+  align-items: flex-start;
+}
+
+.col-1 img {
+  max-width: 260px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.col-2 {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.col-2 h2 {
+  font-size: 1.6rem;
+}
+
+.row-1 {
+  line-height: 0.5;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.row-2 {
+  font-size: 0.9rem;
+}
+
+.row-3 {
+  line-height: 0.7;
+  font-size: 0.8rem;
+}
+
+.row-0 {
+  font-size: 1.2rem;
+  line-height: 0.8;
+}

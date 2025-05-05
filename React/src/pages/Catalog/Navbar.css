@@ -1,0 +1,51 @@
+.navbar {
+    margin: 0; /* Remove any unwanted outer margins */
+    position: fixed;
+    top: 0;
+    left: 0; /* Ensure it starts from the very left */
+    width: 100%; /* Full width of the viewport */
+    height: 10%; /* Keep the height uniform */
+    background-color: #000;
+    color: #fff; /* Adjust color if needed */
+    display: flex;
+    align-items: center; /* Vertical alignment */
+    justify-content: space-between; /* Title on the left, links on the right */
+    padding: 2%; /* Add even spacing on the sides */
+    box-sizing: border-box; /* Include padding in the width calculation */
+    z-index: 1000; /* Ensure it stays above other content */
+    overflow: visible; /* Allow dropdowns to show outside the navbar */
+  }
+
+  /* Title styling */
+.navbar-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    max-width: 1000px;
+  }
+
+  .navbar-features-container {
+    display: flex;
+    gap: 50px;
+    align-items: center;
+  }
+  
+  .navbar-icon {
+    cursor: pointer;
+    color: white;
+    transition: transform 0.2s ease;
+  }
+
+  .cart-count {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background-color: #cd0000;
+    color: #fff;
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 40%;
+  }
+  
+  .navbar-icon:hover {
+    transform: scale(1.1);
+  }
