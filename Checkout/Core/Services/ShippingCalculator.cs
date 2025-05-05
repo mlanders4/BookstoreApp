@@ -135,4 +135,16 @@ namespace Bookstore.Checkout.Core.Services
 
         // Supporting classes
         private record GeoCoordinates(double Latitude, double Longitude);
-        private record Nominatim
+        private record NominatimResponse(string Lat, string Lon);
+        private record OsrmResponse(Route[] Routes);
+        private record Route(double Distance);
+        private record ShippingRates(Rate Standard, Rate Express);
+        private record Rate(decimal Base, decimal PerMile);
+    }
+
+    public class ShippingCalculationException : Exception
+    {
+        public ShippingCalculationException(string message, Exception innerException) 
+            : base(message, innerException) { }
+    }
+}
