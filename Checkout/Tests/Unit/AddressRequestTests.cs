@@ -1,6 +1,8 @@
 using Bookstore.Checkout.Models.Requests;
 using System.ComponentModel.DataAnnotations;
 using Xunit;
+using System.Linq;
+using System.Collections.Generic;
 
 namespace Bookstore.Checkout.Tests.Models.Requests
 {
@@ -53,10 +55,11 @@ namespace Bookstore.Checkout.Tests.Models.Requests
         }
     }
 
-    // Helper extension for string repeating
     public static class StringExtensions
     {
         public static string Repeat(this string value, int count)
-            => string.Concat(Enumerable.Repeat(value, count));
+        {
+            return string.Concat(Enumerable.Repeat(value, count));
+        }
     }
 }
