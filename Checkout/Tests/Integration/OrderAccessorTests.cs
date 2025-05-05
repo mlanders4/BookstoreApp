@@ -1,76 +1,47 @@
-using Bookstore.Checkout.Accessors;
-using Bookstore.Checkout.Models.Entities;
-using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Logging;
-using Moq;
-using System.Threading.Tasks;
-using Xunit;
+using Microsoft.EntityFrameworkCore;
 
-namespace Bookstore.Checkout.Tests.Integration
+namespace Bookstore.Checkout.Tests.Accessors
 {
-    public class OrderAccessorTests : IClassFixture<DatabaseFixture>
+    public class OrderAccessorTests : IDisposable
     {
-        private readonly DatabaseFixture _dbFixture;
+        private readonly CheckoutDbContext _context;
+        private readonly OrderAccessor _accessor;
 
-        public OrderAccessorTests(DatabaseFixture dbFixture)
+        public OrderAccessorTests()
         {
-            _dbFixture = dbFixture;
+            var options = new DbContextOptionsBuilder<CheckoutDbContext>()
+                .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
+                .Options;
+            
+            _context = new CheckoutDbContext(options);
+            _accessor = new OrderAccessor(_context, Mock.Of<ILogger<OrderAccessor>>());
         }
 
         [Fact]
-        public async Task CreateOrderAsync_ValidOrder_ReturnsOrderId()
+        public async Task CreateOrderAsync_SavesOrderWithItems()
         {
             // Arrange
-            var logger = Mock.Of<ILogger<OrderAccessor>>();
-            var accessor = new OrderAccessor(_dbFixture.ConnectionString, logger);
-            
-            var order = new OrderEntity
+            var order = new Order
             {
-                UserId = 1,
-                CartId = 1,
-                Status = "pending",
-                Items = new List<OrderItemEntity>
+                UserId = Guid.NewGuid(),
+                Items = new List<OrderItem>
                 {
-                    new() { BookId = "978-3-16-148410-0", Quantity = 1, UnitPrice = 29.99m }
+                    new OrderItem { BookId = "9788414295080", Quantity = 2 }
                 }
             };
 
             // Act
-            var orderId = await accessor.CreateOrderAsync(order);
+            var orderId = await _accessor.CreateOrderAsync(order);
 
             // Assert
-            Assert.True(orderId > 0);
+            var savedOrder = await _context.Orders
+                .Include(o => o.Items)
+                .FirstAsync();
             
-            // Verify in database
-            using var connection = new SqlConnection(_dbFixture.ConnectionString);
-            await connection.OpenAsync();
-            
-            var cmd = new SqlCommand(
-                "SELECT COUNT(*) FROM CartItem WHERE cart_id = @orderId", 
-                connection);
-            cmd.Parameters.AddWithValue("@orderId", orderId);
-            
-            var itemCount = (int)await cmd.ExecuteScalarAsync();
-            Assert.Equal(1, itemCount);
-        }
-    }
-
-    public class DatabaseFixture : IDisposable
-    {
-        public string ConnectionString { get; }
-
-        public DatabaseFixture()
-        {
-            ConnectionString = "Server=(localdb)\\mssqllocaldb;Database=BookstoreCheckoutTests;Trusted_Connection=True;";
-            
-            // Initialize test database
-            TestDatabaseInitializer.Initialize(ConnectionString);
+            Assert.Single(savedOrder.Items);
+            Assert.Equal("9788414295080", savedOrder.Items[0].BookId);
         }
 
-        public void Dispose()
-        {
-            // Cleanup test data
-            TestDatabaseInitializer.Cleanup(ConnectionString);
-        }
+        public void Dispose() => _context.Dispose();
     }
 }
