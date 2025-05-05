@@ -1,8 +1,6 @@
-<<<<<<< HEAD
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Catalog.Accessor;
 using Catalog.Accessor;
 
 namespace Catalog.Engine
@@ -289,4 +287,3 @@ namespace Catalog.Engine
         }
     }
 }
->>>>>>> catalog-updated
