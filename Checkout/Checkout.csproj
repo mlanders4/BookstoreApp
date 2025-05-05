@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Required packages for your shipping service -->
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
+    <PackageReference Include="System.Text.Json" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Organize your source folders -->
+    <Compile Include="Core/**/*.cs" />
+    <Compile Include="Contracts/**/*.cs" />
+    <Compile Include="Models/**/*.cs" />
+    <Compile Include="Accessors/**/*.cs" />
+    <Compile Include="Controller/**/*.cs" />
+    <Compile Include="Data/**/*.cs" />
+    <Compile Include="Extensions/**/*.cs" />
+    <Compile Include="Properties/**/*.cs" />
+  </ItemGroup>
+</Project>
