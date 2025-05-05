@@ -1,0 +1,83 @@
+{
+  "format": 1,
+  "restore": {
+    "/Users/michaeln/Library/CloudStorage/OneDrive-Personal/Desktop/361/project/Bookstore/BookstoreApp/Login/Login.scproj": {}
+  },
+  "projects": {
+    "/Users/michaeln/Library/CloudStorage/OneDrive-Personal/Desktop/361/project/Bookstore/BookstoreApp/Login/Login.scproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/Users/michaeln/Library/CloudStorage/OneDrive-Personal/Desktop/361/project/Bookstore/BookstoreApp/Login/Login.scproj",
+        "projectName": "Login",
+        "projectPath": "/Users/michaeln/Library/CloudStorage/OneDrive-Personal/Desktop/361/project/Bookstore/BookstoreApp/Login/Login.scproj",
+        "packagesPath": "/Users/michaeln/.nuget/packages/",
+        "outputPath": "/Users/michaeln/Library/CloudStorage/OneDrive-Personal/Desktop/361/project/Bookstore/BookstoreApp/Login/obj/",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/Users/michaeln/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {}
+          }
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "9.0.100"
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "dependencies": {
+            "BCrypt.Net-Next": {
+              "target": "Package",
+              "version": "[4.0.2, )"
+            },
+            "Microsoft.AspNetCore.OpenApi": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
+            "Microsoft.EntityFrameworkCore.SqlServer": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
+            "Swashbuckle.AspNetCore": {
+              "target": "Package",
+              "version": "[6.5.0, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.AspNetCore.App": {
+              "privateAssets": "none"
+            },
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "/usr/local/share/dotnet/sdk/9.0.102/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}
