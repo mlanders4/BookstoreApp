@@ -4,25 +4,37 @@ import { CartContext } from "./CartContext";
 import { FiX } from "react-icons/fi";
 
 function CatalogPage() {
+  // react state for stoting fetched books
   const [books, setBooks] = useState([]);
+
+  // state for search input
   const [searchQuery, setSearchQuery] = useState("");
+
+  // state for dropdown filters
   const [selectedGenre, setSelectedGenre] = useState("");
   const [selectedPrice, setSelectedPrice] = useState("");
   const [selectedRating, setSelectedRating] = useState("");
 
+  // fetch books whenver searchQuery or selectedGenre changes
   useEffect(() => {
-    fetch("http://localhost:5246/api/catalog")
+    let url = "http://localhost:5246/api/catalog/books";
+
+    if (searchQuery.trim() !== "") {
+      url = `http://localhost:5246/api/catalog/books/search?term=${searchQuery}`;
+    }
+
+    fetch(url)
       .then((res) => res.json())
       .then((data) => {
-        console.log("Books fetched:", data); 
         setBooks(data);
       })
       .catch((err) => console.error("Error fetching books:", err));
-  }, []);
+  }, [searchQuery]);
 
+  // access cart context
   const { cartItems, setCartItems } = useContext(CartContext);
 
-  // Add this function inside CatalogPage component
+  // function to book to the cart
   const handleAddToCart = (book) => {
     setCartItems((prevItems) => {
       const existing = prevItems.find((item) => item.isbn === book.isbn);
@@ -38,7 +50,7 @@ function CatalogPage() {
     });
   };
 
-  // 🔍 Filter books using search + dropdowns
+  // filter books using search + dropdowns
   const filteredBooks = books.filter((book) => {
     const matchesTitle = book.name
       .toLowerCase()
@@ -47,13 +59,23 @@ function CatalogPage() {
       selectedGenre === "" || book.category === selectedGenre;
     const matchesPrice =
       selectedPrice === "" || book.price <= parseFloat(selectedPrice);
-    // Note: Backend doesn't include rating yet, so this is placeholder
     const matchesRating =
-      selectedRating === "" || 4.5 >= parseFloat(selectedRating); // placeholder logic
+      selectedRating === "" || 4.5 >= parseFloat(selectedRating);
 
     return matchesTitle && matchesGenre && matchesPrice && matchesRating;
   });
 
+  const [genres, setGenres] = useState([]);
+
+  // get genre options
+  useEffect(() => {
+    fetch("http://localhost:5246/api/catalog/categories")
+      .then((res) => res.json())
+      .then((data) => setGenres(data))
+      .catch((err) => console.error("Error fetching categories:", err));
+  }, []);
+
+  // removeing book from cart function
   const handleRemove = (isbn) => {
     setCartItems((prevItems) => prevItems.filter((item) => item.isbn !== isbn));
   };
@@ -65,7 +87,7 @@ function CatalogPage() {
       <div className="search-filter">
         <input
           type="text"
-          placeholder="Search by Title"
+          placeholder="Search by Title, Author, Genre, or ISBN"
           className="search-bar"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
@@ -76,12 +98,11 @@ function CatalogPage() {
             onChange={(e) => setSelectedGenre(e.target.value)}
           >
             <option value="">Any Genres</option>
-            <option value="Fiction">Fiction</option>
-            <option value="Epic">Epic</option>
-            <option value="Philosophical">Philosophical</option>
-            <option value="Romance">Romance</option>
-            <option value="Adventure">Adventure</option>
-            <option value="Horror">Horror</option>
+            {genres.map((genre) => (
+              <option key={genre} value={genre}>
+                {genre}
+              </option>
+            ))}
           </select>
 
           <select
@@ -111,7 +132,7 @@ function CatalogPage() {
           {filteredBooks.map((book) => (
             <div key={book.isbn} className="book-card">
               <img
-                src={`/images/${book.product_Image}`}
+                src={`/images/${book.productImage}`}
                 alt={book.name}
                 className="clickable-image"
                 onClick={() => setSelectedBook(book)}
@@ -157,7 +178,7 @@ function CatalogPage() {
               <div className="popup-body">
                 <div className="col-1">
                   <img
-                    src={`/images/${selectedBook.product_Image}`}
+                    src={`/images/${selectedBook.productImage}`}
                     alt={selectedBook.name}
                   />
                 </div>
@@ -202,7 +223,7 @@ function CatalogPage() {
                   <div className="row-3">
                     <p>
                       <p>
-                        Sale Status: <strong>{selectedBook.sale_Status}</strong>
+                        Sale Status: <strong>{selectedBook.saleStatus}</strong>
                       </p>
                       ISBN: <strong>{selectedBook.isbn}</strong>
                     </p>

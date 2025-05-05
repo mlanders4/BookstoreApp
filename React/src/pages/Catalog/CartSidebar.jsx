@@ -35,7 +35,7 @@ function CartSidebar() {
       <div className="cart-body">
         {cartItems.map((item) => (
           <div key={item.isbn} className="cart-item">
-            <img src={`/images/${item.product_Image}`} alt={item.name} />
+            <img src={`/images/${item.productImage}`} alt={item.name} />
             <div className="info">
               <h2>{item.name}</h2>
               <h3>{item.author}</h3>

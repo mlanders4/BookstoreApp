@@ -1,26 +1,30 @@
-using Microsoft.EntityFrameworkCore;
-using BookstoreApp.Database;
-using BookstoreApp.Catalog.Accessor;
-using BookstoreApp.Catalog.Engine;
+using Catalog.Accessor;
+using Catalog.Engine;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container
 builder.Services.AddControllers();
 
-builder.Services.AddDbContext<BookstoreDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+// Register CatalogAccessor with the connection string
+builder.Services.AddScoped<CatalogAccessor>(provider =>
+{
+    var config = provider.GetRequiredService<IConfiguration>();
+    string connectionString = config.GetConnectionString("DefaultConnection");
+    return new CatalogAccessor(connectionString);
+});
 
-builder.Services.AddScoped<BookAccessor>();
+// Register CatalogEngine
 builder.Services.AddScoped<CatalogEngine>();
 
+// for React frontend
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowReact", builder =>
+    options.AddPolicy("AllowReact", policy =>
     {
-        builder.WithOrigins("http://localhost:3001")
-               .AllowAnyHeader()
-               .AllowAnyMethod();
+        policy.WithOrigins("http://localhost:3001")
+              .AllowAnyHeader()
+              .AllowAnyMethod();
     });
 });
 
@@ -34,7 +38,5 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseCors("AllowReact");
 app.UseAuthorization();
-
 app.MapControllers();
-
 app.Run();
