@@ -1,4 +1,3 @@
-// In Contracts/IPaymentValidator.cs
 namespace Bookstore.Checkout.Contracts;
 
 public interface IPaymentValidator
