@@ -1,6 +1,3 @@
-using System;
-using System.ComponentModel.DataAnnotations.Schema;
-
 namespace Bookstore.Checkout.Data.Entities
 {
     public class Payment
@@ -9,7 +6,7 @@ namespace Bookstore.Checkout.Data.Entities
         public int Id { get; set; }
 
         [Column("order_id")]
-        public Guid OrderId { get; set; }
+        public int OrderId { get; set; }
 
         [Column("credit_card_number")]
         public string MaskedCardNumber { get; set; }
