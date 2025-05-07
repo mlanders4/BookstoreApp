@@ -1,5 +1,10 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace Bookstore.Checkout.Data.Entities
 {
+    [Table("Orders")]
     public class Order
     {
         [Column("order_id")]
@@ -18,20 +23,32 @@ namespace Bookstore.Checkout.Data.Entities
         public DateTime OrderDate { get; set; } = DateTime.UtcNow.Date;
 
         [Column("status")]
-        public string Status { get; set; } = "pending"; // pending/processing/shipped/cancelled/completed
+        public string Status { get; set; } = "pending";
 
         // Navigation properties
-        public Payment Payment { get; set; }
-        public ShippingDetail ShippingDetail { get; set; }
-        public List<OrderItem> Items { get; set; } = new();
+        public virtual Payment Payment { get; set; }
+        public virtual ShippingDetail ShippingDetail { get; set; }
+        public virtual ICollection<OrderItem> Items { get; set; } = new List<OrderItem>();
     }
 
+    [Table("OrderItems")]
     public class OrderItem
     {
+        [Column("order_item_id")]
         public int Id { get; set; }
+
+        [Column("order_id")]
         public int OrderId { get; set; }
-        public string BookId { get; set; }  // ISBN
+
+        [Column("isbn")]
+        public string BookId { get; set; }
+
+        [Column("quantity")]
         public int Quantity { get; set; }
+
+        [Column("unit_price")]
         public decimal UnitPrice { get; set; }
+
+        public virtual Order Order { get; set; }
     }
 }
