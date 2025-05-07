@@ -25,22 +25,21 @@ namespace Bookstore.Checkout.Data.Entities
         [Column("status")]
         public string Status { get; set; } = "pending";
 
-        // Navigation properties
-        public virtual Payment Payment { get; set; }
-        public virtual ShippingDetail ShippingDetail { get; set; }
-        public virtual ICollection<OrderItem> Items { get; set; } = new List<OrderItem>();
+        // Only include navigation properties you actually use
+        public List<OrderItem> Items { get; set; } = new();
     }
 
+    // Only include if you actually use order items
     [Table("OrderItems")]
     public class OrderItem
     {
-        [Column("order_item_id")]
+        [Column("id")] // Adjust to match your actual PK column name
         public int Id { get; set; }
 
         [Column("order_id")]
         public int OrderId { get; set; }
 
-        [Column("isbn")]
+        [Column("book_id")] // Or "isbn" if that's your column name
         public string BookId { get; set; }
 
         [Column("quantity")]
@@ -48,7 +47,5 @@ namespace Bookstore.Checkout.Data.Entities
 
         [Column("unit_price")]
         public decimal UnitPrice { get; set; }
-
-        public virtual Order Order { get; set; }
     }
 }
