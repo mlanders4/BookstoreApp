@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Bookstore.Checkout.Data.Entities
 {
-    [Table("Checkout")]
+    [Table("Checkout")] // Matches your table name
     public class Payment
     {
         [Column("checkout_id")]
@@ -21,9 +21,7 @@ namespace Bookstore.Checkout.Data.Entities
         [Column("amount")]
         public decimal Amount { get; set; }
 
-        [Column("payment_status")]
+        [Column("status")] // Matches your "payment_status" column if different
         public string Status { get; set; } = "pending";
-
-        public virtual Order Order { get; set; }
     }
 }
