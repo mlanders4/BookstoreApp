@@ -1,10 +1,10 @@
-using Bookstore.Checkout.Contracts;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
 using System;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Bookstore.Checkout.Contracts;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Bookstore.Checkout.Core.Services
 {
@@ -30,10 +30,8 @@ namespace Bookstore.Checkout.Core.Services
 
         public async Task<decimal> CalculateShippingAsync(AddressDto address, int itemCount)
         {
-            if (itemCount <= 0)
-            {
-                throw new ArgumentException("Item count must be positive", nameof(itemCount));
-            }
+            if (address == null) throw new ArgumentNullException(nameof(address));
+            if (itemCount <= 0) throw new ArgumentOutOfRangeException(nameof(itemCount));
 
             try
             {
@@ -65,11 +63,9 @@ namespace Bookstore.Checkout.Core.Services
         {
             try 
             {
-                // Step 1: Geocode addresses
                 var originCoords = await GeocodeAddressAsync(origin);
                 var destCoords = await GeocodeAddressAsync(destination);
 
-                // Step 2: Get driving distance
                 var response = await _httpClient.GetAsync(
                     $"https://router.project-osrm.org/route/v1/driving/" +
                     $"{originCoords.Longitude},{originCoords.Latitude};" +
@@ -85,7 +81,7 @@ namespace Bookstore.Checkout.Core.Services
                     throw new Exception("No route data received from OSRM");
                 }
 
-                return osrmResponse.Routes[0].Distance / 1609.34; // Convert meters to miles
+                return osrmResponse.Routes[0].Distance / 1609.34;
             }
             catch (Exception ex)
             {
@@ -128,12 +124,10 @@ namespace Bookstore.Checkout.Core.Services
             var baseRate = rates.Standard.Base + (rates.Standard.PerMile * (decimal)distance);
             var total = baseRate * itemCount;
             
-            // Apply minimum charge
             var minimumCharge = _config.GetValue<decimal>("Shipping:MinimumCharge");
             return Math.Max(total, minimumCharge);
         }
 
-        // Supporting classes
         private record GeoCoordinates(double Latitude, double Longitude);
         private record NominatimResponse(string Lat, string Lon);
         private record OsrmResponse(Route[] Routes);
