@@ -2,13 +2,14 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Bookstore.Checkout.Data.Entities
 {
-    public class ShippingDetail
+    [Table("ShippingDetails")] // Maps to your actual table name
+    public class Shipping
     {
         [Column("ship_id")]
         public int Id { get; set; }
 
         [Column("order_id")]
-        public Guid OrderId { get; set; }
+        public int OrderId { get; set; }
 
         [Column("street")]
         public string StreetAddress { get; set; }
@@ -21,7 +22,5 @@ namespace Bookstore.Checkout.Data.Entities
 
         [Column("country")]
         public string Country { get; set; }
-
-        public Order Order { get; set; }
     }
 }
