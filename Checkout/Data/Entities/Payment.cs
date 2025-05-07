@@ -1,5 +1,9 @@
+using System;
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace Bookstore.Checkout.Data.Entities
 {
+    [Table("Checkout")]
     public class Payment
     {
         [Column("checkout_id")]
@@ -20,6 +24,6 @@ namespace Bookstore.Checkout.Data.Entities
         [Column("payment_status")]
         public string Status { get; set; } = "pending";
 
-        public Order Order { get; set; }
+        public virtual Order Order { get; set; }
     }
 }
