@@ -1,7 +1,7 @@
 using System;
 using System.Data;
 using System.Data.SqlClient;
-using Bookstore.Checkout.Models.Entities;
+using Bookstore.Checkout.Data.Entities;
 using Microsoft.Extensions.Logging;
 
 namespace Bookstore.Checkout.Accessors
@@ -17,7 +17,7 @@ namespace Bookstore.Checkout.Accessors
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public async Task<int> CreatePaymentAsync(PaymentEntity payment)
+        public async Task<int> CreatePaymentAsync(Payment payment)
         {
             const string sql = @"
                 INSERT INTO Checkout (
@@ -25,8 +25,7 @@ namespace Bookstore.Checkout.Accessors
                     credit_card_number, 
                     expiry_date, 
                     amount, 
-                    status, 
-                    payment_date
+                    status
                 )
                 OUTPUT INSERTED.checkout_id
                 VALUES (
@@ -34,8 +33,7 @@ namespace Bookstore.Checkout.Accessors
                     @CardNumber, 
                     @ExpiryDate, 
                     @Amount, 
-                    @Status, 
-                    @PaymentDate
+                    @Status
                 )";
 
             using var connection = new SqlConnection(_connectionString);
@@ -43,51 +41,35 @@ namespace Bookstore.Checkout.Accessors
 
             try
             {
+                // Mask card number before storing
+                payment.MaskedCardNumber = MaskCardNumber(payment.MaskedCardNumber);
+
                 command.Parameters.AddRange(new[]
                 {
                     new SqlParameter("@OrderId", payment.OrderId),
                     new SqlParameter("@CardNumber", payment.MaskedCardNumber),
                     new SqlParameter("@ExpiryDate", payment.ExpiryDate),
                     new SqlParameter("@Amount", payment.Amount),
-                    new SqlParameter("@Status", payment.PaymentStatus ?? "Pending"),
-                    new SqlParameter("@PaymentDate", payment.PaymentDate)
+                    new SqlParameter("@Status", payment.Status ?? "Pending")
                 });
 
                 await connection.OpenAsync();
                 var checkoutId = (int)await command.ExecuteScalarAsync();
                 
-                _logger.LogInformation(
-                    "Created payment record {CheckoutId} for order {OrderId}", 
+                _logger.LogInformation("Created payment record {CheckoutId} for order {OrderId}", 
                     checkoutId, payment.OrderId);
                 
                 return checkoutId;
             }
-            catch (SqlException ex) when (ex.Number == 2627) // Unique constraint
+            catch (SqlException ex) when (ex.Number == 2627)
             {
-                _logger.LogError(
-                    ex, 
-                    "Duplicate payment attempt for order {OrderId}", 
-                    payment.OrderId);
-                throw new PaymentAccessException(
-                    $"Payment for order {payment.OrderId} already exists", ex);
-            }
-            catch (SqlException ex) when (ex.Number == 547) // FK violation
-            {
-                _logger.LogError(
-                    ex, 
-                    "Invalid OrderId {OrderId} in payment record", 
-                    payment.OrderId);
-                throw new PaymentAccessException(
-                    $"Invalid OrderId: {payment.OrderId}", ex);
+                _logger.LogError(ex, "Duplicate payment attempt for order {OrderId}", payment.OrderId);
+                throw new PaymentAccessException($"Payment for order {payment.OrderId} already exists", ex);
             }
             catch (Exception ex)
             {
-                _logger.LogError(
-                    ex, 
-                    "Failed to create payment for order {OrderId}", 
-                    payment.OrderId);
-                throw new PaymentAccessException(
-                    "Payment creation failed", ex);
+                _logger.LogError(ex, "Failed to create payment for order {OrderId}", payment.OrderId);
+                throw new PaymentAccessException("Payment creation failed", ex);
             }
         }
 
@@ -97,9 +79,9 @@ namespace Bookstore.Checkout.Accessors
                 UPDATE Checkout 
                 SET 
                     status = @Status,
-                    payment_date = CASE 
+                    expiry_date = CASE 
                         WHEN @Status = 'Completed' THEN GETUTCDATE() 
-                        ELSE payment_date 
+                        ELSE expiry_date 
                     END
                 WHERE checkout_id = @CheckoutId";
 
@@ -119,26 +101,22 @@ namespace Bookstore.Checkout.Accessors
 
                 if (affectedRows == 0)
                 {
-                    _logger.LogWarning(
-                        "No payment record updated for CheckoutId {CheckoutId}", 
-                        checkoutId);
-                    throw new PaymentAccessException(
-                        $"Payment record {checkoutId} not found");
+                    _logger.LogWarning("No payment record updated for CheckoutId {CheckoutId}", checkoutId);
+                    throw new PaymentAccessException($"Payment record {checkoutId} not found");
                 }
-
-                _logger.LogInformation(
-                    "Updated payment {CheckoutId} to status {Status}", 
-                    checkoutId, status);
             }
             catch (Exception ex)
             {
-                _logger.LogError(
-                    ex, 
-                    "Failed to update payment {CheckoutId}", 
-                    checkoutId);
-                throw new PaymentAccessException(
-                    "Payment status update failed", ex);
+                _logger.LogError(ex, "Failed to update payment {CheckoutId}", checkoutId);
+                throw new PaymentAccessException("Payment status update failed", ex);
             }
+        }
+
+        private string MaskCardNumber(string cardNumber)
+        {
+            if (string.IsNullOrWhiteSpace(cardNumber)) return string.Empty;
+            if (cardNumber.Length <= 4) return "****";
+            return $"****-****-****-{cardNumber[^4..]}";
         }
     }
 
