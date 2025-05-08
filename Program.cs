@@ -1,5 +1,7 @@
 using Catalog.Accessor;
 using Catalog.Engine;
+using Bookstore.Checkout.Accessors;
+using Bookstore.Checkout.Core.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,6 +28,24 @@ builder.Services.AddCors(options =>
               .AllowAnyHeader()
               .AllowAnyMethod();
     });
+});
+
+// Add Checkout services (NEW)
+builder.Services.AddScoped<IOrderAccessor, OrderAccessor>(provider => 
+{
+    var config = provider.GetRequiredService<IConfiguration>();
+    return new OrderAccessor(config, provider.GetService<ILogger<OrderAccessor>>());
+});
+
+builder.Services.AddScoped<IShippingAccessor, ShippingAccessor>();
+builder.Services.AddScoped<ICheckoutService, CheckoutService>();
+builder.Services.AddScoped<ICheckoutValidatorService, CheckoutValidatorService>();
+
+// Add HttpClient for shipping calculations
+builder.Services.AddHttpClient("ShippingAPI", client => 
+{
+    client.BaseAddress = new Uri("https://api.shipping-provider.com");
+    client.Timeout = TimeSpan.FromSeconds(30);
 });
 
 var app = builder.Build();
