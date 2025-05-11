@@ -1,3 +1,6 @@
+using System;
+using System.Threading.Tasks;
+using Bookstore.Checkout.Data.Entities;
 namespace Bookstore.Checkout.Accessors
 {
     public interface IOrderAccessor
