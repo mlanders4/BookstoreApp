@@ -12,10 +12,12 @@ namespace Bookstore.Checkout.Accessors
         private readonly ILogger<ShippingAccessor> _logger;
 
         public ShippingAccessor(string connectionString, ILogger<ShippingAccessor> logger)
-        {
-            _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        }
+    {
+        // Use the team's connection string name
+        _connectionString = config.GetConnectionString("DefaultConnection") 
+            ?? throw new ArgumentNullException("DefaultConnection not found");
+        _logger = logger;
+    }
 
         public async Task<int> CreateShippingAsync(Shipping shipping)
         {
