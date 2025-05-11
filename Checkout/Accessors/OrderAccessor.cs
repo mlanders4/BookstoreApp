@@ -15,9 +15,10 @@ namespace Bookstore.Checkout.Accessors
 
         public OrderAccessor(IConfiguration config, ILogger<OrderAccessor> logger)
         {
-            _connectionString = config?.GetConnectionString("CheckoutDB") ?? 
-                throw new ArgumentNullException(nameof(config));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            // Use the team's connection string name
+            _connectionString = config.GetConnectionString("DefaultConnection") 
+            ?? throw new ArgumentNullException("DefaultConnection not found");
+            _logger = logger;
         }
 
         public async Task<int> CreateOrderAsync(Order order)
