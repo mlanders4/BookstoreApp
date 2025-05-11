@@ -12,11 +12,11 @@ namespace Bookstore.Checkout.Tests.Accessors
 
         public ShippingAccessorTests()
         {
-            _connection = new SqlConnection("Your_Test_Connection_String");
+            _connection = new SqlConnection("CheckoutTestsDB");
             _connection.Open();
             
             var logger = Mock.Of<ILogger<ShippingAccessor>>();
-            _accessor = new ShippingAccessor("Your_Test_Connection_String", logger);
+            _accessor = new ShippingAccessor("CheckoutTestDB", logger);
         }
 
         [Fact]
